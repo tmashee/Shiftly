@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
 import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
-import { doc, getDoc, getFirestore, setDoc } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js';
+import { doc, getFirestore, onSnapshot, setDoc } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyCJgBqGe9HvTLdzg3Sn8lbGetWpj8nGtNU',
@@ -84,11 +84,12 @@ function applyCloudData(data) {
 async function initializeCloudSync() {
   try {
     const credential = await signInAnonymously(firebaseAuth);
-    cloudDocument = doc(firestore, 'users', credential.user.uid);
-    const snapshot = await getDoc(cloudDocument);
-    if (snapshot.exists()) applyCloudData(snapshot.data());
-    cloudReady = true;
-    saveCloudState();
+    cloudDocument = doc(firestore, 'shared', 'schedule');
+    onSnapshot(cloudDocument, snapshot => {
+      cloudReady = true;
+      if (snapshot.exists()) applyCloudData(snapshot.data());
+      else saveCloudState();
+    }, error => console.error('Unable to listen for Shiftly updates.', error));
   } catch (error) {
     console.error('Shiftly cloud sync is unavailable.', error);
   }
