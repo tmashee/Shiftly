@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
-import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
+import { getAuth, GoogleAuthProvider, linkWithPopup, signInAnonymously, signInWithPopup } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
 import { doc, getFirestore, onSnapshot, setDoc } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js';
 
 const firebaseConfig = {
@@ -16,6 +16,10 @@ const firebaseAuth = getAuth(firebaseApp);
 const firestore = getFirestore(firebaseApp);
 let cloudDocument;
 let cloudReady = false;
+let currentUserId;
+let currentUserLabel = 'Anonymous device';
+let undoSnapshot;
+let cloudWriteQueue = Promise.resolve();
 
 // Shift status values and default schedule configuration.
 const DAY = 'day';
@@ -65,12 +69,48 @@ const state = {
   theme: localStorage.getItem('shiftly-theme') === 'light' ? 'light' : 'dark'
 };
 
-function cloudData() { return { settings: state.settings, overrides: state.overrides, notes: state.notes }; }
-function saveCloudState() { if (cloudReady) setDoc(cloudDocument, cloudData()).catch(error => console.error('Unable to sync Shiftly data.', error)); }
+function setSyncStatus(label, stateClass = '') { const element = document.querySelector('#syncStatus'); if (element) { element.textContent = label; element.className = `sync-status ${stateClass}`; } }
+function cloudData() { return { settings: state.settings, overrides: state.overrides, notes: state.notes, syncMeta: { updatedAt: new Date().toISOString(), updatedBy: currentUserId || 'unknown', updatedByLabel: currentUserLabel } }; }
+function saveCloudState() {
+  if (!cloudReady) return;
+  setSyncStatus('Saving', 'saving');
+  const payload = cloudData();
+  cloudWriteQueue = cloudWriteQueue.then(() => setDoc(cloudDocument, payload)).then(() => setSyncStatus('Synced', 'synced')).catch(error => { setSyncStatus('Offline', 'offline'); console.error('Unable to sync Shiftly data.', error); });
+}
+function rememberUndo() { undoSnapshot = { kind: 'all', data: JSON.parse(JSON.stringify({ settings: state.settings, overrides: state.overrides, notes: state.notes })) }; const button = document.querySelector('#undoButton'); if (button) button.disabled = false; }
+function rememberDayUndo(key) { undoSnapshot = { kind: 'day', key, override: state.overrides[key] ? JSON.parse(JSON.stringify(state.overrides[key])) : null, note: state.notes[key] ? JSON.parse(JSON.stringify(state.notes[key])) : null }; const button = document.querySelector('#undoButton'); if (button) button.disabled = false; }
+function undoLastChange() {
+  if (!undoSnapshot) return;
+  if (undoSnapshot.kind === 'day') {
+    if (undoSnapshot.override) state.overrides[undoSnapshot.key] = undoSnapshot.override;
+    else delete state.overrides[undoSnapshot.key];
+    if (undoSnapshot.note) state.notes[undoSnapshot.key] = undoSnapshot.note;
+    else delete state.notes[undoSnapshot.key];
+  } else {
+    state.settings = undoSnapshot.data.settings;
+    state.overrides = undoSnapshot.data.overrides;
+    state.notes = undoSnapshot.data.notes;
+  }
+  localStorage.setItem('shiftly-settings', JSON.stringify(state.settings));
+  localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides));
+  localStorage.setItem('shiftly-notes', JSON.stringify(state.notes));
+  undoSnapshot = null;
+  document.querySelector('#undoButton').disabled = true;
+  saveCloudState();
+  render();
+}
 function applyCloudData(data) {
   if (data.settings && typeof data.settings === 'object') state.settings = { ...state.settings, ...data.settings };
   if (data.overrides && typeof data.overrides === 'object') state.overrides = data.overrides;
   if (data.notes && typeof data.notes === 'object') state.notes = data.notes;
+  if (data.syncMeta) {
+    const updatedAt = new Date(data.syncMeta.updatedAt);
+    const syncStatus = document.querySelector('#syncStatus');
+    if (syncStatus) syncStatus.title = `Last updated by ${data.syncMeta.updatedByLabel || 'another device'} at ${updatedAt.toLocaleString()}`;
+    const notice = document.querySelector('#remoteChangeNotice');
+    const isRecentRemote = data.syncMeta.updatedBy && data.syncMeta.updatedBy !== currentUserId && Date.now() - updatedAt.getTime() < 120000;
+    if (notice) { const updater = data.syncMeta.updatedByLabel && data.syncMeta.updatedByLabel !== 'Anonymous device' ? data.syncMeta.updatedByLabel : 'another device'; notice.textContent = isRecentRemote ? `Updated by ${updater} at ${updatedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : ''; notice.classList.toggle('is-hidden', !isRecentRemote); }
+  }
   localStorage.setItem('shiftly-settings', JSON.stringify(state.settings));
   localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides));
   localStorage.setItem('shiftly-notes', JSON.stringify(state.notes));
@@ -79,16 +119,34 @@ function applyCloudData(data) {
 async function initializeCloudSync() {
   try {
     const credential = await signInAnonymously(firebaseAuth);
+    currentUserId = credential.user.uid;
+    currentUserLabel = credential.user.displayName || credential.user.email || 'Anonymous device';
+    updateAuthStatus(credential.user);
     cloudDocument = doc(firestore, 'shared', 'schedule');
     onSnapshot(cloudDocument, snapshot => {
       cloudReady = true;
+      setSyncStatus('Synced', 'synced');
       if (snapshot.exists()) applyCloudData(snapshot.data());
       else saveCloudState();
-    }, error => console.error('Unable to listen for Shiftly updates.', error));
+    }, error => { setSyncStatus('Offline', 'offline'); console.error('Unable to listen for Shiftly updates.', error); });
   } catch (error) {
+    setSyncStatus('Offline', 'offline');
     console.error('Shiftly cloud sync is unavailable.', error);
   }
 }
+async function signInWithGoogle() {
+  try {
+    const provider = new GoogleAuthProvider();
+    const user = firebaseAuth.currentUser;
+    const result = user?.isAnonymous ? await linkWithPopup(user, provider) : await signInWithPopup(firebaseAuth, provider);
+    currentUserId = result.user.uid;
+    currentUserLabel = result.user.displayName || result.user.email || 'Google account';
+    updateAuthStatus(result.user);
+  } catch (error) {
+    alert(error.code === 'auth/popup-closed-by-user' ? 'Google sign-in was cancelled.' : 'Google sign-in was unavailable. Enable Google in Firebase Authentication.');
+  }
+}
+function updateAuthStatus(user) { const element = document.querySelector('#authStatus'); if (element) element.textContent = user?.isAnonymous ? 'Anonymous sync is active on this device.' : `Signed in as ${user.displayName || user.email || 'Google account'}.`; }
 
 function people() { return { intel: state.settings.intelName, pfizer: state.settings.pfizerName, creche: state.settings.crecheName }; }
 function personInitial(name) { return name.trim().charAt(0).toUpperCase(); }
@@ -159,7 +217,7 @@ function shiftsFor(date) {
   return { intel: override.intel || intel(date), pfizer: override.pfizer || pfizer(date), creche: override.creche || creche(date) };
 }
 
-function typeLabel(type) { return ({ day: 'DAY', night: 'NIGHT', off: 'OFF', creche: 'ON' })[type]; }
+function typeLabel(type) { return ({ day: 'DAY', night: 'NIGHT', off: 'OFF', creche: 'ON', hospital: 'HOSPITAL APPOINTMENT' })[type]; }
 function statusDescription(type) { return ({ day: 'Day shift', night: 'Night shift', off: 'Rest day', creche: people().creche })[type]; }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]); }
 
@@ -182,7 +240,7 @@ function renderHero() {
     const monthShifts = shiftsFor(monthDate);
     if (monthShifts.intel !== OFF && monthShifts.pfizer !== OFF) overlapCount += 1;
   }
-  document.querySelector('#nextShift').innerHTML = `<p class="overline">${isToday ? 'TODAY · ' : ''}${format(date, { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase()}</p><div class="shift-main"><div><p class="shift-name">${isToday ? title : 'Pattern for this day'}</p><p class="shift-meta">${active.length ? `${active.length} scheduled` : 'No scheduled shifts'}</p></div><div class="header-summary"><span class="overlap-summary" aria-label="${overlapCount} shift overlap days">${overlapCount} overlap</span></div></div><div class="selected-shifts" aria-label="Calendars">${Object.entries(shifts).map(([name, type]) => `<button class="selected-shift ${type} calendar-toggle ${state.visibility[name] ? 'selected' : ''}" type="button" data-calendar="${name}" aria-pressed="${state.visibility[name]}"><strong>${personInitial(people()[name])} · ${escapeHtml(people()[name])}</strong><span>${typeLabel(type)}</span></button>`).join('')}</div>${note?.text ? `<p class="selected-note"><strong>${note.type === 'note' ? 'NOTE' : typeLabel(note.type) || note.type.toUpperCase()}</strong> ${escapeHtml(note.text)}</p>` : ''}<button id="editDayButton" class="edit-day-button" type="button">Edit selected day</button>`;
+  document.querySelector('#nextShift').innerHTML = `<p class="overline">${isToday ? 'TODAY · ' : ''}${format(date, { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase()}</p><div class="shift-main"><div><p class="shift-name">${isToday ? title : 'Pattern for this day'}</p><p class="shift-meta">${active.length ? `${active.length} scheduled` : 'No scheduled shifts'}</p></div><div class="header-summary"><span class="overlap-summary" aria-label="${overlapCount} shift overlap days">${overlapCount} overlap</span></div></div><div class="selected-shifts" aria-label="Calendars">${Object.entries(shifts).map(([name, type]) => `<button class="selected-shift ${type} calendar-toggle ${state.visibility[name] ? 'selected' : ''}" type="button" data-calendar="${name}" aria-pressed="${state.visibility[name]}" aria-label="${escapeHtml(people()[name])} calendar ${state.visibility[name] ? 'visible' : 'hidden'}"><strong>${personInitial(people()[name])} · ${escapeHtml(people()[name])}</strong><span>${typeLabel(type)}</span></button>`).join('')}</div>${note?.text ? `<p class="selected-note"><strong>${note.type === 'note' ? 'NOTE' : typeLabel(note.type) || note.type.toUpperCase()}</strong> ${escapeHtml(note.text)}</p>` : ''}<button id="editDayButton" class="edit-day-button" type="button">Edit selected day</button>`;
   document.querySelectorAll('.calendar-toggle').forEach(button => button.addEventListener('click', toggleCalendarVisibility));
   document.querySelector('#editDayButton').addEventListener('click', openEditor);
 }
@@ -210,7 +268,7 @@ function renderMonth() {
     grid.appendChild(button);
   }
 }
-function toggleCalendarVisibility(event) { const name = event.currentTarget.dataset.calendar; state.visibility[name] = !state.visibility[name]; localStorage.setItem('shiftly-calendar-visibility', JSON.stringify(state.visibility)); saveCloudState(); render(); }
+function toggleCalendarVisibility(event) { const name = event.currentTarget.dataset.calendar; state.visibility[name] = !state.visibility[name]; localStorage.setItem('shiftly-calendar-visibility', JSON.stringify(state.visibility)); render(); }
 
 // Update the selected day and return the view to the top.
 function selectDay(date) { state.selectedDate = date; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
@@ -251,6 +309,7 @@ function openEditor() {
   const note = state.notes[dayKey(date)] || { type: 'note', text: '' };
   document.querySelector('#noteType').value = note.type;
   document.querySelector('#noteText').value = note.text;
+  updateNotePlaceholder();
   document.querySelector('#sheetScrim').classList.remove('is-hidden'); document.querySelector('#dayEditor').classList.remove('is-hidden');
 }
 function closeEditor() { document.querySelector('#sheetScrim').classList.add('is-hidden'); document.querySelector('#dayEditor').classList.add('is-hidden'); }
@@ -268,9 +327,10 @@ function syncAutomaticNote(key, date) {
 }
 function escapeRegExp(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 // Save a shift toggle, or remove it when the original pattern is selected.
-function saveDayOverride(event) { const { person, type } = event.currentTarget.dataset; const key = dayKey(state.selectedDate); const originalType = ({ intel, pfizer, creche })[person](state.selectedDate); if (type === originalType) { if (state.overrides[key]) { delete state.overrides[key][person]; if (!Object.keys(state.overrides[key]).length) delete state.overrides[key]; } } else { state.overrides[key] = { ...(state.overrides[key] || {}), [person]: type }; } syncAutomaticNote(key, state.selectedDate); localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); openEditor(); render(); }
-function resetSelectedDay() { const key = dayKey(state.selectedDate); delete state.overrides[key]; delete state.notes[key]; localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); closeEditor(); render(); }
-function saveNote() { const type = document.querySelector('#noteType').value; const text = document.querySelector('#noteText').value.trim(); state.notes[dayKey(state.selectedDate)] = { type, text }; localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); closeEditor(); render(); }
+function saveDayOverride(event) { const { person, type } = event.currentTarget.dataset; const key = dayKey(state.selectedDate); rememberDayUndo(key); const originalType = ({ intel, pfizer, creche })[person](state.selectedDate); if (type === originalType) { if (state.overrides[key]) { delete state.overrides[key][person]; if (!Object.keys(state.overrides[key]).length) delete state.overrides[key]; } } else { state.overrides[key] = { ...(state.overrides[key] || {}), [person]: type }; } syncAutomaticNote(key, state.selectedDate); localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); openEditor(); render(); }
+function resetSelectedDay() { const key = dayKey(state.selectedDate); rememberDayUndo(key); delete state.overrides[key]; delete state.notes[key]; localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); closeEditor(); render(); }
+function saveNote() { const key = dayKey(state.selectedDate); rememberDayUndo(key); const type = document.querySelector('#noteType').value; const text = document.querySelector('#noteText').value.trim(); state.notes[key] = { type, text }; localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); closeEditor(); render(); }
+function updateNotePlaceholder() { document.querySelector('#noteText').placeholder = document.querySelector('#noteType').value === 'hospital' ? 'Time & Location' : 'Optional details'; }
 function parsePattern(value) { const pattern = value.split(',').map(item => Number(item.trim())); if (!pattern.length || pattern.some(item => !Number.isInteger(item) || item === 0)) throw new Error('Use comma-separated non-zero whole numbers.'); return pattern; }
 function parseCrecheDays(value) { const parts = value.split(',').map(item => item.trim()); if (!parts.length || parts.some(part => part === '')) throw new Error('Use unique comma-separated weekday numbers from 0 to 6.'); const days = parts.map(Number); if (days.some(day => !Number.isInteger(day) || day < 0 || day > 6) || new Set(days).size !== days.length) throw new Error('Use unique comma-separated weekday numbers from 0 to 6.'); return days; }
 function dateFromInput(value) { const [year, month, day] = value.split('-').map(Number); return utcDate(year, month, day); }
@@ -278,6 +338,7 @@ function dateFromInput(value) { const [year, month, day] = value.split('-').map(
 function saveSettings(event) {
   event.preventDefault();
   try {
+    rememberUndo();
     const names = { intelName: document.querySelector('#intelName').value.trim(), pfizerName: document.querySelector('#pfizerName').value.trim(), crecheName: document.querySelector('#crecheName').value.trim() };
     if (Object.values(names).some(name => !name)) throw new Error('Calendar names cannot be empty.');
     state.settings = { ...names, intelFirstPattern: parsePattern(document.querySelector('#intelFirstPattern').value), intelSecondPattern: parsePattern(document.querySelector('#intelSecondPattern').value), intelAnchor: document.querySelector('#intelAnchor').value, pfizerAnchor: document.querySelector('#pfizerAnchor').value, pfizerPattern: parsePattern(document.querySelector('#pfizerPattern').value), crecheDays: parseCrecheDays(document.querySelector('#crecheDays').value) };
@@ -288,6 +349,7 @@ function saveSettings(event) {
 // Restore defaults and remove every saved calendar customization.
 function resetAllChanges() {
   if (!confirm('Reset patterns, shift changes, notes, and theme to the defaults?')) return;
+  rememberUndo();
   state.settings = { ...DEFAULT_SETTINGS, intelName: DEFAULT_PEOPLE.intel, pfizerName: DEFAULT_PEOPLE.pfizer, crecheName: DEFAULT_PEOPLE.creche, intelFirstPattern: [...DEFAULT_SETTINGS.intelFirstPattern], intelSecondPattern: [...DEFAULT_SETTINGS.intelSecondPattern], pfizerPattern: [...DEFAULT_SETTINGS.pfizerPattern], crecheDays: [...DEFAULT_SETTINGS.crecheDays] };
   state.overrides = {};
   state.notes = {};
@@ -303,7 +365,8 @@ function resetAllChanges() {
 }
 function todayUTC() { const local = new Date(); return utcDate(local.getFullYear(), local.getMonth() + 1, local.getDate()); }
 function goToday() { const today = todayUTC(); state.displayedMonth = utcDate(today.getUTCFullYear(), today.getUTCMonth() + 1, 1); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
-function setTheme(theme) { const nextTheme = theme === 'light' ? 'light' : 'dark'; state.theme = nextTheme; document.documentElement.dataset.theme = nextTheme; localStorage.setItem('shiftly-theme', nextTheme); saveCloudState(); const toggle = document.querySelector('#themeToggle'); if (toggle) toggle.checked = nextTheme === 'dark'; const label = document.querySelector('#themeModeLabel'); if (label) label.textContent = nextTheme === 'dark' ? 'Dark' : 'Light'; }
+function changeMonth(amount) { state.displayedMonth = utcDate(state.displayedMonth.getUTCFullYear(), state.displayedMonth.getUTCMonth() + amount + 1, 1); renderMonth(); renderHero(); }
+function setTheme(theme) { const nextTheme = theme === 'light' ? 'light' : 'dark'; state.theme = nextTheme; document.documentElement.dataset.theme = nextTheme; localStorage.setItem('shiftly-theme', nextTheme); const toggle = document.querySelector('#themeToggle'); if (toggle) toggle.checked = nextTheme === 'dark'; const label = document.querySelector('#themeModeLabel'); if (label) label.textContent = nextTheme === 'dark' ? 'Dark' : 'Light'; }
 function exportColor(type) { return ({ day: '#ffb36b', night: '#6e5ae6', off: '#e4e6e3', creche: '#f47e96' })[type]; }
 // Create the SVG used by image and print/PDF exports.
 function yearSvg(year) {
@@ -320,6 +383,41 @@ function yearSvg(year) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${content}</svg>`;
 }
 function downloadBlob(blob, filename) { const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000); }
+function escapeIcs(value) { return String(value || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n'); }
+function unescapeIcs(value) { return value.replace(/\\n/g, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\'); }
+function exportIcs() {
+  const events = Object.entries(state.notes).filter(([, note]) => note.type === 'hospital').map(([dateKey, note], index) => {
+    const date = dateKey.replace(/-/g, '');
+    return ['BEGIN:VEVENT', `UID:shiftly-${dateKey}-${index}@shiftly`, `DTSTAMP:${date}T000000Z`, `DTSTART;VALUE=DATE:${date}`, 'SUMMARY:Hospital appointment', `DESCRIPTION:${escapeIcs(note.text)}`, 'END:VEVENT'].join('\r\n');
+  });
+  const calendar = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Shiftly//Hospital appointments//EN', ...events, 'END:VCALENDAR'].join('\r\n');
+  downloadBlob(new Blob([calendar], { type: 'text/calendar;charset=utf-8' }), 'shiftly-hospital-appointments.ics');
+}
+function importIcs(event) {
+  const file = event.currentTarget.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const lines = String(reader.result).replace(/\r\n[ \t]/g, '').split(/\r?\n/);
+    let appointment;
+    let imported = 0;
+    lines.forEach(line => {
+      if (line === 'BEGIN:VEVENT') appointment = {};
+      else if (line === 'END:VEVENT' && appointment?.date) { rememberUndo(); state.notes[appointment.date] = { type: 'hospital', text: appointment.description || '' }; imported += 1; appointment = null; }
+      else if (appointment) {
+        const separator = line.indexOf(':');
+        if (separator < 0) return;
+        const key = line.slice(0, separator);
+        const value = unescapeIcs(line.slice(separator + 1));
+        if (key.startsWith('DTSTART')) { const date = value.slice(0, 8); appointment.date = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`; }
+        if (key === 'DESCRIPTION') appointment.description = value;
+      }
+    });
+    if (imported) { localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); render(); }
+    event.currentTarget.value = '';
+  };
+  reader.readAsText(file);
+}
 function exportImage() { const year = state.displayedMonth.getUTCFullYear(), svg = yearSvg(year), image = new Image(); image.onload = () => { const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 1540; canvas.getContext('2d').drawImage(image, 0, 0); canvas.toBlob(blob => downloadBlob(blob, `shiftly-${year}.png`), 'image/png'); }; image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`; }
 function exportPdf() { const year = state.displayedMonth.getUTCFullYear(), svg = yearSvg(year), printWindow = window.open('', '_blank'); if (!printWindow) return; printWindow.document.write(`<title>Shiftly ${year}</title><style>@page{size:A4 portrait;margin:8mm}body{margin:0}img{display:block;width:100%;height:auto}</style><img src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}">`); printWindow.document.close(); printWindow.onload = () => printWindow.print(); }
 
@@ -327,8 +425,11 @@ function exportPdf() { const year = state.displayedMonth.getUTCFullYear(), svg =
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js');
 setTheme(state.theme);
 
-document.querySelector('#previousMonth').addEventListener('click', () => { state.displayedMonth = utcDate(state.displayedMonth.getUTCFullYear(), state.displayedMonth.getUTCMonth(), 1); renderMonth(); renderHero(); });
-document.querySelector('#nextMonth').addEventListener('click', () => { state.displayedMonth = utcDate(state.displayedMonth.getUTCFullYear(), state.displayedMonth.getUTCMonth() + 2, 1); renderMonth(); renderHero(); });
+document.querySelector('#previousMonth').addEventListener('click', () => changeMonth(-1));
+document.querySelector('#nextMonth').addEventListener('click', () => changeMonth(1));
+let swipeStartX = null;
+document.querySelector('#calendarGrid').addEventListener('touchstart', event => { if (event.touches.length === 1) swipeStartX = event.touches[0].clientX; }, { passive: true });
+document.querySelector('#calendarGrid').addEventListener('touchend', event => { if (swipeStartX === null) return; const distance = event.changedTouches[0].clientX - swipeStartX; swipeStartX = null; if (Math.abs(distance) < 55) return; changeMonth(distance < 0 ? 1 : -1); }, { passive: true });
 document.querySelector('#todayButton').addEventListener('click', goToday);
 document.querySelector('#themeToggle').addEventListener('change', event => setTheme(event.currentTarget.checked ? 'dark' : 'light'));
 document.querySelector('#settingsButton').addEventListener('click', openSettings);
@@ -338,8 +439,13 @@ document.querySelector('#settingsForm').addEventListener('submit', saveSettings)
 document.querySelector('#closeEditor').addEventListener('click', closeEditor);
 document.querySelector('#resetDay').addEventListener('click', resetSelectedDay);
 document.querySelector('#saveNote').addEventListener('click', saveNote);
+document.querySelector('#noteType').addEventListener('change', updateNotePlaceholder);
 document.querySelector('#exportImage').addEventListener('click', exportImage);
 document.querySelector('#exportPdf').addEventListener('click', exportPdf);
 document.querySelector('#resetAllChanges').addEventListener('click', resetAllChanges);
+document.querySelector('#undoButton').addEventListener('click', undoLastChange);
+document.querySelector('#googleSignIn').addEventListener('click', signInWithGoogle);
+document.querySelector('#exportIcs').addEventListener('click', exportIcs);
+document.querySelector('#importIcs').addEventListener('change', importIcs);
 render();
 initializeCloudSync();
