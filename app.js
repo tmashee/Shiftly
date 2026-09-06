@@ -87,16 +87,18 @@ function shiftsFor(date) {
 
 function typeLabel(type) { return ({ day: 'DAY', night: 'NIGHT', off: 'OFF', creche: 'ON' })[type]; }
 function statusDescription(type) { return ({ day: 'Day shift', night: 'Night shift', off: 'Rest day', creche: 'Crèche' })[type]; }
+function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]); }
 
 function render() { renderHero(); renderMonth(); renderOverlap(); }
 
 function renderHero() {
   const date = state.selectedDate;
   const shifts = shiftsFor(date);
+  const note = state.notes[dayKey(date)];
   const active = Object.entries(shifts).filter(([, type]) => type !== OFF);
   const title = active.length ? `${active.length} shift${active.length > 1 ? 's' : ''} today` : 'A day to recharge';
   const isToday = dayKey(date) === dayKey(todayUTC());
-  document.querySelector('#nextShift').innerHTML = `<p class="overline">${isToday ? 'TODAY · ' : ''}${format(date, { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase()}</p><div class="shift-main"><div><p class="shift-name">${isToday ? title : 'Pattern for this day'}</p><p class="shift-meta">${active.length ? `${active.length} scheduled` : 'No scheduled shifts'}</p></div><div class="shift-mark">${active.length ? '✦' : '☼'}</div></div><div class="selected-shifts">${Object.entries(shifts).map(([name, type]) => `<div class="selected-shift ${type}"><strong>${name.charAt(0).toUpperCase()} · ${PEOPLE[name]}</strong><span>${typeLabel(type)}</span></div>`).join('')}</div><button id="editDayButton" class="edit-day-button" type="button">Edit selected day</button>`;
+  document.querySelector('#nextShift').innerHTML = `<p class="overline">${isToday ? 'TODAY · ' : ''}${format(date, { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase()}</p><div class="shift-main"><div><p class="shift-name">${isToday ? title : 'Pattern for this day'}</p><p class="shift-meta">${active.length ? `${active.length} scheduled` : 'No scheduled shifts'}</p></div><div class="shift-mark">${active.length ? '✦' : '☼'}</div></div><div class="selected-shifts">${Object.entries(shifts).map(([name, type]) => `<div class="selected-shift ${type}"><strong>${name.charAt(0).toUpperCase()} · ${PEOPLE[name]}</strong><span>${typeLabel(type)}</span></div>`).join('')}</div>${note?.text ? `<p class="selected-note"><strong>${note.type === 'note' ? 'NOTE' : typeLabel(note.type) || note.type.toUpperCase()}</strong> ${escapeHtml(note.text)}</p>` : ''}<button id="editDayButton" class="edit-day-button" type="button">Edit selected day</button>`;
   document.querySelector('#editDayButton').addEventListener('click', openEditor);
 }
 
@@ -114,8 +116,9 @@ function renderMonth() {
     const inMonth = date.getUTCMonth() === view.getUTCMonth();
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `calendar-day${inMonth ? '' : ' outside'}${dayKey(date) === dayKey(today) ? ' today' : ''}${dayKey(date) === dayKey(state.selectedDate) ? ' selected' : ''}`;
-    button.innerHTML = `${state.notes[dayKey(date)] ? '<i class="note-indicator" aria-label="Note added"></i>' : ''}<span class="date-number">${date.getUTCDate()}</span><span class="day-dots">${Object.entries(shifts).map(([name, type]) => `<i class="dot ${type}" aria-label="${PEOPLE[name]} ${typeLabel(type)}">${name.charAt(0).toUpperCase()}</i>`).join('')}</span>`;
+    const overlap = shifts.intel !== OFF && shifts.pfizer !== OFF;
+    button.className = `calendar-day${inMonth ? '' : ' outside'}${dayKey(date) === dayKey(today) ? ' today' : ''}${dayKey(date) === dayKey(state.selectedDate) ? ' selected' : ''}${overlap ? ' overlap' : ''}`;
+    button.innerHTML = `${state.notes[dayKey(date)] ? '<i class="note-indicator" aria-label="Note added"></i>' : ''}<span class="date-number">${date.getUTCDate()}</span><span class="day-dots">${Object.entries(shifts).map(([name, type]) => `<i class="dot ${name} ${type}" aria-label="${PEOPLE[name]} ${typeLabel(type)}">${name.charAt(0).toUpperCase()}</i>`).join('')}</span>`;
     button.addEventListener('click', () => selectDay(date));
     grid.appendChild(button);
   }
@@ -156,14 +159,24 @@ function openEditor() {
     return `<div class="sheet-row"><div><strong>${PEOPLE[name]}</strong><span>Pattern: ${statusDescription(type)}</span></div><div class="sheet-toggle">${allowed.map(option => `<button class="type-button ${option === type ? 'selected' : ''}" data-person="${name}" data-type="${option}">${typeLabel(option)}</button>`).join('')}</div></div>`;
   }).join('');
   document.querySelectorAll('.type-button').forEach(button => button.addEventListener('click', saveDayOverride));
-  const note = state.notes[dayKey(date)] || { type: 'leave', text: '' };
+  const note = state.notes[dayKey(date)] || { type: 'note', text: '' };
   document.querySelector('#noteType').value = note.type;
   document.querySelector('#noteText').value = note.text;
   document.querySelector('#sheetScrim').classList.remove('is-hidden'); document.querySelector('#dayEditor').classList.remove('is-hidden');
 }
 function closeEditor() { document.querySelector('#sheetScrim').classList.add('is-hidden'); document.querySelector('#dayEditor').classList.add('is-hidden'); }
-function saveDayOverride(event) { const { person, type } = event.currentTarget.dataset; const key = dayKey(state.selectedDate); state.overrides[key] = { ...(state.overrides[key] || {}), [person]: type }; localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); openEditor(); render(); }
-function resetSelectedDay() { delete state.overrides[dayKey(state.selectedDate)]; localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); closeEditor(); render(); }
+function syncAutomaticNote(key, date) {
+  const override = state.overrides[key] || {};
+  const toggledPeople = ['intel', 'pfizer'].filter(person => override[person] && override[person] !== ({ intel, pfizer, creche })[person](date));
+  const note = state.notes[key];
+  const isAutomatic = note?.automatic || /^(Intel|Pfizer) (Leave|OT)(, (Intel|Pfizer) (Leave|OT))*$/.test(note?.text || '');
+  if (toggledPeople.length) {
+    const allOff = toggledPeople.every(person => override[person] === OFF);
+    state.notes[key] = { type: allOff ? 'leave' : 'overtime', text: toggledPeople.map(person => `${PEOPLE[person]} ${override[person] === OFF ? 'Leave' : 'OT'}`).join(', '), automatic: true };
+  } else if (isAutomatic) delete state.notes[key];
+}
+function saveDayOverride(event) { const { person, type } = event.currentTarget.dataset; const key = dayKey(state.selectedDate); const originalType = ({ intel, pfizer, creche })[person](state.selectedDate); if (type === originalType) { if (state.overrides[key]) { delete state.overrides[key][person]; if (!Object.keys(state.overrides[key]).length) delete state.overrides[key]; } } else { state.overrides[key] = { ...(state.overrides[key] || {}), [person]: type }; } syncAutomaticNote(key, state.selectedDate); localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); openEditor(); render(); }
+function resetSelectedDay() { const key = dayKey(state.selectedDate); delete state.overrides[key]; delete state.notes[key]; localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); closeEditor(); render(); }
 function saveNote() { const type = document.querySelector('#noteType').value; const text = document.querySelector('#noteText').value.trim(); state.notes[dayKey(state.selectedDate)] = { type, text }; localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); closeEditor(); render(); }
 function parsePattern(value) { const pattern = value.split(',').map(item => Number(item.trim())); if (!pattern.length || pattern.some(item => !Number.isInteger(item) || item === 0)) throw new Error('Use comma-separated non-zero whole numbers.'); return pattern; }
 function dateFromInput(value) { const [year, month, day] = value.split('-').map(Number); return utcDate(year, month, day); }

@@ -38,6 +38,7 @@ h2 { margin-bottom: 0; font-size: 19px; letter-spacing: -.04em; }
 .shift-meta { margin: 8px 0 0; font-size: 13px; font-weight: 650; }
 .shift-mark { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 17px; background: rgba(255,255,255,.5); font-size: 22px; }
 .selected-shifts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 15px; }.selected-shift { padding: 8px 7px; border-radius: 12px; background: rgba(255,255,255,.52); text-align: center; }.selected-shift strong { display: block; font-size: 10px; letter-spacing: .07em; }.selected-shift span { display: block; margin-top: 3px; font-size: 11px; font-weight: 800; }.selected-shift.day { color: #9d5107; background: var(--orange-pale); }.selected-shift.night { color: #4f3eb9; background: var(--purple-pale); }.selected-shift.off { color: #737a72; background: var(--off); }.selected-shift.creche { color: #bc3d5c; background: var(--rose-pale); }
+.selected-note { margin: 11px 0 0; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.52); color: var(--lime-ink); font-size: 12px; line-height: 1.35; }.selected-note strong { margin-right: 4px; font-size: 10px; letter-spacing: .08em; }
 .edit-day-button { width: 100%; margin-top: 11px; padding: 9px; border: 1px solid rgba(53,64,26,.22); border-radius: 11px; background: rgba(255,255,255,.42); color: var(--lime-ink); font-size: 12px; font-weight: 800; }
 
 .month-panel { padding: 17px 13px 14px; border: 1px solid var(--line); border-radius: 25px; background: var(--card); box-shadow: var(--shadow); }
@@ -53,9 +54,11 @@ h2 { margin-bottom: 0; font-size: 19px; letter-spacing: -.04em; }
 .calendar-day.today { background: var(--ink); color: white; }
 .calendar-day.selected { box-shadow: inset 0 0 0 2px var(--purple); background: var(--purple-pale); color: #4533af; }
 .calendar-day.today.selected { box-shadow: inset 0 0 0 2px var(--lime); background: var(--ink); color: white; }
+.calendar-day.overlap { box-shadow: inset 0 0 0 2px var(--lime); }
 .date-number { display: block; text-align: center; font-size: 12px; font-weight: 760; }
 .day-dots { display: flex; justify-content: center; gap: 3px; margin-top: 7px; min-height: 7px; }
 .dot { width: 11px; height: 11px; display: grid; place-items: center; border-radius: 50%; color: white; font-size: 6px; font-style: normal; font-weight: 900; line-height: 1; }
+.dot.pfizer { border-radius: 3px; }
 .dot.day { background: var(--orange); }.dot.night { background: var(--purple); }.dot.creche { background: var(--rose); }.dot.off { background: #d6dad5; }
 .today .dot.off { background: #71808c; }
 
