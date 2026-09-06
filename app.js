@@ -1,9 +1,28 @@
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
+import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
+import { doc, getDoc, getFirestore, setDoc } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: 'AIzaSyCJgBqGe9HvTLdzg3Sn8lbGetWpj8nGtNU',
+  authDomain: 'shiftly-4102a.firebaseapp.com',
+  projectId: 'shiftly-4102a',
+  storageBucket: 'shiftly-4102a.firebasestorage.app',
+  messagingSenderId: '274876588338',
+  appId: '1:274876588338:web:e7071fcf4fa56c3fe3b72b',
+  measurementId: 'G-8LWRFKCB1Y'
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const firebaseAuth = getAuth(firebaseApp);
+const firestore = getFirestore(firebaseApp);
+let cloudDocument;
+let cloudReady = false;
+
 // Shift status values and default schedule configuration.
 const DAY = 'day';
 const NIGHT = 'night';
 const OFF = 'off';
 const CRECHE = 'creche';
-const PEOPLE = { intel: 'Intel', pfizer: 'Pfizer', creche: 'Crèche' };
+const DEFAULT_PEOPLE = { intel: 'Int', pfizer: 'Pfi', creche: 'Crè' };
 const DEFAULT_SETTINGS = {
   intelFirstPattern: [3, -3, 4, -4, 3, -3, 4, -4, 4, -3, 3, -4, 4, -3, 3, -4],
   intelSecondPattern: [3, -4, 4, -3, 3, -4, 4, -4, 3, -3, 4, -4, 3, -3, 4, -3],
@@ -13,17 +32,70 @@ const DEFAULT_SETTINGS = {
 };
 
 // Restore saved preferences before building the application state.
-const savedSettings = JSON.parse(localStorage.getItem('shiftly-settings') || '{}');
-const savedPfizerPattern = Array.isArray(savedSettings.pfizerPattern) && savedSettings.pfizerPattern.every(Number.isInteger)
-  ? savedSettings.pfizerPattern : DEFAULT_SETTINGS.pfizerPattern;
+function readStoredObject(key) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '{}');
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch (error) {
+    return {};
+  }
+}
+function isValidPattern(pattern) { return Array.isArray(pattern) && pattern.length > 0 && pattern.every(value => Number.isInteger(value) && value !== 0); }
+function isValidCrecheDays(days) { return Array.isArray(days) && days.length > 0 && days.every(day => Number.isInteger(day) && day >= 0 && day <= 6) && new Set(days).size === days.length; }
+function isValidDateInput(value) { const date = new Date(`${value}T00:00:00Z`); return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(date.getTime()); }
+const savedSettings = readStoredObject('shiftly-settings');
+const savedVisibility = readStoredObject('shiftly-calendar-visibility');
 const state = {
   displayedMonth: new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), 1)),
   selectedDate: todayUTC(),
-  settings: { ...DEFAULT_SETTINGS, ...savedSettings, pfizerPattern: savedPfizerPattern },
-  overrides: JSON.parse(localStorage.getItem('shiftly-overrides') || '{}'),
-  notes: JSON.parse(localStorage.getItem('shiftly-notes') || '{}'),
-  theme: localStorage.getItem('shiftly-theme') || 'dark'
+  settings: {
+    intelName: typeof savedSettings.intelName === 'string' && savedSettings.intelName.trim() ? savedSettings.intelName.trim() : DEFAULT_PEOPLE.intel,
+    pfizerName: typeof savedSettings.pfizerName === 'string' && savedSettings.pfizerName.trim() ? savedSettings.pfizerName.trim() : DEFAULT_PEOPLE.pfizer,
+    crecheName: typeof savedSettings.crecheName === 'string' && savedSettings.crecheName.trim() ? savedSettings.crecheName.trim() : DEFAULT_PEOPLE.creche,
+    intelFirstPattern: isValidPattern(savedSettings.intelFirstPattern) ? [...savedSettings.intelFirstPattern] : [...DEFAULT_SETTINGS.intelFirstPattern],
+    intelSecondPattern: isValidPattern(savedSettings.intelSecondPattern) ? [...savedSettings.intelSecondPattern] : [...DEFAULT_SETTINGS.intelSecondPattern],
+    intelAnchor: isValidDateInput(savedSettings.intelAnchor) ? savedSettings.intelAnchor : DEFAULT_SETTINGS.intelAnchor,
+    pfizerAnchor: isValidDateInput(savedSettings.pfizerAnchor) ? savedSettings.pfizerAnchor : DEFAULT_SETTINGS.pfizerAnchor,
+    pfizerPattern: isValidPattern(savedSettings.pfizerPattern) ? [...savedSettings.pfizerPattern] : [...DEFAULT_SETTINGS.pfizerPattern],
+    crecheDays: isValidCrecheDays(savedSettings.crecheDays) ? [...savedSettings.crecheDays] : [...DEFAULT_SETTINGS.crecheDays]
+  },
+  overrides: readStoredObject('shiftly-overrides'),
+  visibility: { intel: savedVisibility.intel !== false, pfizer: savedVisibility.pfizer !== false, creche: savedVisibility.creche !== false },
+  notes: readStoredObject('shiftly-notes'),
+  theme: localStorage.getItem('shiftly-theme') === 'light' ? 'light' : 'dark'
 };
+
+function cloudData() { return { settings: state.settings, overrides: state.overrides, notes: state.notes, visibility: state.visibility, theme: state.theme }; }
+function saveCloudState() { if (cloudReady) setDoc(cloudDocument, cloudData()).catch(error => console.error('Unable to sync Shiftly data.', error)); }
+function applyCloudData(data) {
+  if (data.settings && typeof data.settings === 'object') state.settings = { ...state.settings, ...data.settings };
+  if (data.overrides && typeof data.overrides === 'object') state.overrides = data.overrides;
+  if (data.notes && typeof data.notes === 'object') state.notes = data.notes;
+  if (data.visibility && typeof data.visibility === 'object') state.visibility = { ...state.visibility, ...data.visibility };
+  if (data.theme === 'light' || data.theme === 'dark') state.theme = data.theme;
+  localStorage.setItem('shiftly-settings', JSON.stringify(state.settings));
+  localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides));
+  localStorage.setItem('shiftly-notes', JSON.stringify(state.notes));
+  localStorage.setItem('shiftly-calendar-visibility', JSON.stringify(state.visibility));
+  localStorage.setItem('shiftly-theme', state.theme);
+  setTheme(state.theme);
+  render();
+}
+async function initializeCloudSync() {
+  try {
+    const credential = await signInAnonymously(firebaseAuth);
+    cloudDocument = doc(firestore, 'users', credential.user.uid);
+    const snapshot = await getDoc(cloudDocument);
+    if (snapshot.exists()) applyCloudData(snapshot.data());
+    cloudReady = true;
+    saveCloudState();
+  } catch (error) {
+    console.error('Shiftly cloud sync is unavailable.', error);
+  }
+}
+
+function people() { return { intel: state.settings.intelName, pfizer: state.settings.pfizerName, creche: state.settings.crecheName }; }
+function personInitial(name) { return name.trim().charAt(0).toUpperCase(); }
 
 // Date helpers keep calendar calculations independent of local timezones.
 function utcDate(year, month, day) { return new Date(Date.UTC(year, month - 1, day)); }
@@ -92,7 +164,7 @@ function shiftsFor(date) {
 }
 
 function typeLabel(type) { return ({ day: 'DAY', night: 'NIGHT', off: 'OFF', creche: 'ON' })[type]; }
-function statusDescription(type) { return ({ day: 'Day shift', night: 'Night shift', off: 'Rest day', creche: 'Crèche' })[type]; }
+function statusDescription(type) { return ({ day: 'Day shift', night: 'Night shift', off: 'Rest day', creche: people().creche })[type]; }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]); }
 
 // Refresh all visible calendar content after state changes.
@@ -114,7 +186,8 @@ function renderHero() {
     const monthShifts = shiftsFor(monthDate);
     if (monthShifts.intel !== OFF && monthShifts.pfizer !== OFF) overlapCount += 1;
   }
-  document.querySelector('#nextShift').innerHTML = `<p class="overline">${isToday ? 'TODAY · ' : ''}${format(date, { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase()}</p><div class="shift-main"><div><p class="shift-name">${isToday ? title : 'Pattern for this day'}</p><p class="shift-meta">${active.length ? `${active.length} scheduled` : 'No scheduled shifts'}</p></div><div class="header-summary"><span class="overlap-summary" aria-label="${overlapCount} shift overlap days">${overlapCount} overlap</span></div></div><div class="selected-shifts">${Object.entries(shifts).map(([name, type]) => `<div class="selected-shift ${type}"><strong>${name.charAt(0).toUpperCase()} · ${PEOPLE[name]}</strong><span>${typeLabel(type)}</span></div>`).join('')}</div>${note?.text ? `<p class="selected-note"><strong>${note.type === 'note' ? 'NOTE' : typeLabel(note.type) || note.type.toUpperCase()}</strong> ${escapeHtml(note.text)}</p>` : ''}<button id="editDayButton" class="edit-day-button" type="button">Edit selected day</button>`;
+  document.querySelector('#nextShift').innerHTML = `<p class="overline">${isToday ? 'TODAY · ' : ''}${format(date, { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase()}</p><div class="shift-main"><div><p class="shift-name">${isToday ? title : 'Pattern for this day'}</p><p class="shift-meta">${active.length ? `${active.length} scheduled` : 'No scheduled shifts'}</p></div><div class="header-summary"><span class="overlap-summary" aria-label="${overlapCount} shift overlap days">${overlapCount} overlap</span></div></div><div class="selected-shifts" aria-label="Calendars">${Object.entries(shifts).map(([name, type]) => `<button class="selected-shift ${type} calendar-toggle ${state.visibility[name] ? 'selected' : ''}" type="button" data-calendar="${name}" aria-pressed="${state.visibility[name]}"><strong>${personInitial(people()[name])} · ${escapeHtml(people()[name])}</strong><span>${typeLabel(type)}</span></button>`).join('')}</div>${note?.text ? `<p class="selected-note"><strong>${note.type === 'note' ? 'NOTE' : typeLabel(note.type) || note.type.toUpperCase()}</strong> ${escapeHtml(note.text)}</p>` : ''}<button id="editDayButton" class="edit-day-button" type="button">Edit selected day</button>`;
+  document.querySelectorAll('.calendar-toggle').forEach(button => button.addEventListener('click', toggleCalendarVisibility));
   document.querySelector('#editDayButton').addEventListener('click', openEditor);
 }
 
@@ -122,6 +195,7 @@ function renderHero() {
 function renderMonth() {
   const view = state.displayedMonth;
   document.querySelector('#monthHeading').textContent = format(view, { month: 'long', year: 'numeric' });
+  const names = people();
   const grid = document.querySelector('#calendarGrid');
   grid.innerHTML = '';
   const startOffset = (view.getUTCDay() + 6) % 7;
@@ -133,26 +207,39 @@ function renderMonth() {
     const inMonth = date.getUTCMonth() === view.getUTCMonth();
     const button = document.createElement('button');
     button.type = 'button';
-    const overlap = shifts.intel !== OFF && shifts.pfizer !== OFF;
+    const overlap = state.visibility.intel && state.visibility.pfizer && shifts.intel !== OFF && shifts.pfizer !== OFF;
     button.className = `calendar-day${inMonth ? '' : ' outside'}${dayKey(date) === dayKey(today) ? ' today' : ''}${dayKey(date) === dayKey(state.selectedDate) ? ' selected' : ''}${overlap ? ' overlap' : ''}`;
-    button.innerHTML = `${state.notes[dayKey(date)] ? '<i class="note-indicator" aria-label="Note added"></i>' : ''}<span class="date-number">${date.getUTCDate()}</span><span class="day-dots">${Object.entries(shifts).map(([name, type]) => `<i class="dot ${name} ${type}" aria-label="${PEOPLE[name]} ${typeLabel(type)}">${name.charAt(0).toUpperCase()}</i>`).join('')}</span>`;
+    button.innerHTML = `${state.notes[dayKey(date)] ? '<i class="note-indicator" aria-label="Note added"></i>' : ''}<span class="date-number">${date.getUTCDate()}</span><span class="day-dots">${Object.entries(shifts).filter(([name]) => state.visibility[name]).map(([name, type]) => `<i class="dot ${name} ${type}" aria-label="${escapeHtml(names[name])} ${typeLabel(type)}">${personInitial(names[name])}</i>`).join('')}</span>`;
     button.addEventListener('click', () => selectDay(date));
     grid.appendChild(button);
   }
 }
+function toggleCalendarVisibility(event) { const name = event.currentTarget.dataset.calendar; state.visibility[name] = !state.visibility[name]; localStorage.setItem('shiftly-calendar-visibility', JSON.stringify(state.visibility)); saveCloudState(); render(); }
 
 // Update the selected day and return the view to the top.
 function selectDay(date) { state.selectedDate = date; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 // Open and populate the schedule settings sheet.
 function openSettings() {
   const settings = state.settings;
+  document.querySelector('#intelNameLabel').firstChild.textContent = `${settings.intelName} calendar name`;
+  document.querySelector('#intelFirstPatternLabel').firstChild.textContent = `${settings.intelName} pattern — January to June`;
+  document.querySelector('#intelSecondPatternLabel').firstChild.textContent = `${settings.intelName} pattern — July to December`;
+  document.querySelector('#intelAnchorLabel').firstChild.textContent = `${settings.intelName} anchor date`;
+  document.querySelector('#pfizerNameLabel').firstChild.textContent = `${settings.pfizerName} calendar name`;
+  document.querySelector('#pfizerAnchorLabel').firstChild.textContent = `${settings.pfizerName} cycle anchor date`;
+  document.querySelector('#pfizerPatternLabel').firstChild.textContent = `${settings.pfizerName} shift pattern`;
+  document.querySelector('#crecheNameLabel').firstChild.textContent = `${settings.crecheName} calendar name`;
+  document.querySelector('#crecheDaysLabel').firstChild.textContent = `${settings.crecheName} working days`;
+  document.querySelector('#intelName').value = settings.intelName;
+  document.querySelector('#pfizerName').value = settings.pfizerName;
+  document.querySelector('#crecheName').value = settings.crecheName;
   document.querySelector('#intelFirstPattern').value = settings.intelFirstPattern.join(', ');
   document.querySelector('#intelSecondPattern').value = settings.intelSecondPattern.join(', ');
   document.querySelector('#intelAnchor').value = settings.intelAnchor;
   document.querySelector('#pfizerAnchor').value = settings.pfizerAnchor;
   document.querySelector('#pfizerPattern').value = settings.pfizerPattern.join(', ');
   document.querySelector('#themeToggle').checked = state.theme === 'dark';
-  document.querySelector('#crecheDays').innerHTML = [['M', 1], ['T', 2], ['W', 3], ['T', 4], ['F', 5], ['S', 6], ['S', 0]].map(([label, value]) => `<label class="weekday-option"><input type="checkbox" value="${value}" ${settings.crecheDays.includes(value) ? 'checked' : ''}>${label}</label>`).join('');
+  document.querySelector('#crecheDays').value = settings.crecheDays.join(', ');
   document.querySelector('#sheetScrim').classList.remove('is-hidden'); document.querySelector('#settingsSheet').classList.remove('is-hidden');
 }
 function closeSettings() { document.querySelector('#sheetScrim').classList.add('is-hidden'); document.querySelector('#settingsSheet').classList.add('is-hidden'); }
@@ -162,7 +249,7 @@ function openEditor() {
   document.querySelector('#dayEditorTitle').textContent = format(date, { day: 'numeric', month: 'long' });
   document.querySelector('#editorContent').innerHTML = Object.entries(shifts).map(([name, type]) => {
     const allowed = name === 'creche' ? [DAY, OFF] : [DAY, NIGHT, OFF];
-    return `<div class="sheet-row"><div><strong>${PEOPLE[name]}</strong><span>Pattern: ${statusDescription(type)}</span></div><div class="sheet-toggle">${allowed.map(option => `<button class="type-button ${option === type ? 'selected' : ''}" data-person="${name}" data-type="${option}">${typeLabel(option)}</button>`).join('')}</div></div>`;
+    return `<div class="sheet-row"><div><strong>${escapeHtml(people()[name])}</strong><span>Pattern: ${statusDescription(type)}</span></div><div class="sheet-toggle">${allowed.map(option => `<button class="type-button ${option === type ? 'selected' : ''}" data-person="${name}" data-type="${option}">${typeLabel(option)}</button>`).join('')}</div></div>`;
   }).join('');
   document.querySelectorAll('.type-button').forEach(button => button.addEventListener('click', saveDayOverride));
   const note = state.notes[dayKey(date)] || { type: 'note', text: '' };
@@ -176,54 +263,63 @@ function syncAutomaticNote(key, date) {
   const override = state.overrides[key] || {};
   const toggledPeople = ['intel', 'pfizer'].filter(person => override[person] && override[person] !== ({ intel, pfizer, creche })[person](date));
   const note = state.notes[key];
-  const isAutomatic = note?.automatic || /^(Intel|Pfizer) (Leave|OT)(, (Intel|Pfizer) (Leave|OT))*$/.test(note?.text || '');
+  const names = people();
+  const isAutomatic = note?.automatic || new RegExp(`^(${[names.intel, names.pfizer].map(escapeRegExp).join('|')}) (Leave|OT)(, (${[names.intel, names.pfizer].map(escapeRegExp).join('|')}) (Leave|OT))*$`).test(note?.text || '');
   if (toggledPeople.length) {
     const allOff = toggledPeople.every(person => override[person] === OFF);
-    state.notes[key] = { type: allOff ? 'leave' : 'overtime', text: toggledPeople.map(person => `${PEOPLE[person]} ${override[person] === OFF ? 'Leave' : 'OT'}`).join(', '), automatic: true };
+    state.notes[key] = { type: allOff ? 'leave' : 'overtime', text: toggledPeople.map(person => `${people()[person]} ${override[person] === OFF ? 'Leave' : 'OT'}`).join(', '), automatic: true };
   } else if (isAutomatic) delete state.notes[key];
 }
+function escapeRegExp(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 // Save a shift toggle, or remove it when the original pattern is selected.
-function saveDayOverride(event) { const { person, type } = event.currentTarget.dataset; const key = dayKey(state.selectedDate); const originalType = ({ intel, pfizer, creche })[person](state.selectedDate); if (type === originalType) { if (state.overrides[key]) { delete state.overrides[key][person]; if (!Object.keys(state.overrides[key]).length) delete state.overrides[key]; } } else { state.overrides[key] = { ...(state.overrides[key] || {}), [person]: type }; } syncAutomaticNote(key, state.selectedDate); localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); openEditor(); render(); }
-function resetSelectedDay() { const key = dayKey(state.selectedDate); delete state.overrides[key]; delete state.notes[key]; localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); closeEditor(); render(); }
-function saveNote() { const type = document.querySelector('#noteType').value; const text = document.querySelector('#noteText').value.trim(); state.notes[dayKey(state.selectedDate)] = { type, text }; localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); closeEditor(); render(); }
+function saveDayOverride(event) { const { person, type } = event.currentTarget.dataset; const key = dayKey(state.selectedDate); const originalType = ({ intel, pfizer, creche })[person](state.selectedDate); if (type === originalType) { if (state.overrides[key]) { delete state.overrides[key][person]; if (!Object.keys(state.overrides[key]).length) delete state.overrides[key]; } } else { state.overrides[key] = { ...(state.overrides[key] || {}), [person]: type }; } syncAutomaticNote(key, state.selectedDate); localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); openEditor(); render(); }
+function resetSelectedDay() { const key = dayKey(state.selectedDate); delete state.overrides[key]; delete state.notes[key]; localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); closeEditor(); render(); }
+function saveNote() { const type = document.querySelector('#noteType').value; const text = document.querySelector('#noteText').value.trim(); state.notes[dayKey(state.selectedDate)] = { type, text }; localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); closeEditor(); render(); }
 function parsePattern(value) { const pattern = value.split(',').map(item => Number(item.trim())); if (!pattern.length || pattern.some(item => !Number.isInteger(item) || item === 0)) throw new Error('Use comma-separated non-zero whole numbers.'); return pattern; }
+function parseCrecheDays(value) { const parts = value.split(',').map(item => item.trim()); if (!parts.length || parts.some(part => part === '')) throw new Error('Use unique comma-separated weekday numbers from 0 to 6.'); const days = parts.map(Number); if (days.some(day => !Number.isInteger(day) || day < 0 || day > 6) || new Set(days).size !== days.length) throw new Error('Use unique comma-separated weekday numbers from 0 to 6.'); return days; }
 function dateFromInput(value) { const [year, month, day] = value.split('-').map(Number); return utcDate(year, month, day); }
 // Validate and persist edited patterns and appearance settings.
 function saveSettings(event) {
   event.preventDefault();
   try {
-    state.settings = { intelFirstPattern: parsePattern(document.querySelector('#intelFirstPattern').value), intelSecondPattern: parsePattern(document.querySelector('#intelSecondPattern').value), intelAnchor: document.querySelector('#intelAnchor').value, pfizerAnchor: document.querySelector('#pfizerAnchor').value, pfizerPattern: parsePattern(document.querySelector('#pfizerPattern').value), crecheDays: [...document.querySelectorAll('#crecheDays input:checked')].map(input => Number(input.value)) };
+    const names = { intelName: document.querySelector('#intelName').value.trim(), pfizerName: document.querySelector('#pfizerName').value.trim(), crecheName: document.querySelector('#crecheName').value.trim() };
+    if (Object.values(names).some(name => !name)) throw new Error('Calendar names cannot be empty.');
+    state.settings = { ...names, intelFirstPattern: parsePattern(document.querySelector('#intelFirstPattern').value), intelSecondPattern: parsePattern(document.querySelector('#intelSecondPattern').value), intelAnchor: document.querySelector('#intelAnchor').value, pfizerAnchor: document.querySelector('#pfizerAnchor').value, pfizerPattern: parsePattern(document.querySelector('#pfizerPattern').value), crecheDays: parseCrecheDays(document.querySelector('#crecheDays').value) };
     setTheme(document.querySelector('#themeToggle').checked ? 'dark' : 'light');
-    localStorage.setItem('shiftly-settings', JSON.stringify(state.settings)); closeSettings(); render();
+    localStorage.setItem('shiftly-settings', JSON.stringify(state.settings)); saveCloudState(); closeSettings(); render();
   } catch (error) { alert(error.message); }
 }
 // Restore defaults and remove every saved calendar customization.
 function resetAllChanges() {
   if (!confirm('Reset patterns, shift changes, notes, and theme to the defaults?')) return;
-  state.settings = { ...DEFAULT_SETTINGS, intelFirstPattern: [...DEFAULT_SETTINGS.intelFirstPattern], intelSecondPattern: [...DEFAULT_SETTINGS.intelSecondPattern], pfizerPattern: [...DEFAULT_SETTINGS.pfizerPattern], crecheDays: [...DEFAULT_SETTINGS.crecheDays] };
+  state.settings = { ...DEFAULT_SETTINGS, intelName: DEFAULT_PEOPLE.intel, pfizerName: DEFAULT_PEOPLE.pfizer, crecheName: DEFAULT_PEOPLE.creche, intelFirstPattern: [...DEFAULT_SETTINGS.intelFirstPattern], intelSecondPattern: [...DEFAULT_SETTINGS.intelSecondPattern], pfizerPattern: [...DEFAULT_SETTINGS.pfizerPattern], crecheDays: [...DEFAULT_SETTINGS.crecheDays] };
   state.overrides = {};
   state.notes = {};
   setTheme('dark');
   localStorage.removeItem('shiftly-settings');
   localStorage.removeItem('shiftly-overrides');
   localStorage.removeItem('shiftly-notes');
+  localStorage.removeItem('shiftly-calendar-visibility');
+  state.visibility = { intel: true, pfizer: true, creche: true };
+  saveCloudState();
   openSettings();
   render();
 }
 function todayUTC() { const local = new Date(); return utcDate(local.getFullYear(), local.getMonth() + 1, local.getDate()); }
 function goToday() { const today = todayUTC(); state.displayedMonth = utcDate(today.getUTCFullYear(), today.getUTCMonth() + 1, 1); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
-function setTheme(theme) { state.theme = theme; document.documentElement.dataset.theme = theme; localStorage.setItem('shiftly-theme', theme); }
+function setTheme(theme) { const nextTheme = theme === 'light' ? 'light' : 'dark'; state.theme = nextTheme; document.documentElement.dataset.theme = nextTheme; localStorage.setItem('shiftly-theme', nextTheme); saveCloudState(); const toggle = document.querySelector('#themeToggle'); if (toggle) toggle.checked = nextTheme === 'dark'; const label = document.querySelector('#themeModeLabel'); if (label) label.textContent = nextTheme === 'dark' ? 'Dark' : 'Light'; }
 function exportColor(type) { return ({ day: '#ffb36b', night: '#6e5ae6', off: '#e4e6e3', creche: '#f47e96' })[type]; }
 // Create the SVG used by image and print/PDF exports.
 function yearSvg(year) {
   const width = 1200, height = 1540, columns = 3, cardW = 350, cardH = 345, gapX = 35, gapY = 35, startX = 55, startY = 120;
-  let content = `<rect width="${width}" height="${height}" fill="#f8f8f6"/><text x="55" y="65" font-family="Arial,sans-serif" font-size="35" font-weight="700" fill="#19212d">Shiftly · ${year}</text><text x="55" y="92" font-family="Arial,sans-serif" font-size="15" fill="#78818c">Intel, Pfizer and Crèche shift calendar</text>`;
+  const names = people();
+  let content = `<rect width="${width}" height="${height}" fill="#f8f8f6"/><text x="55" y="65" font-family="Arial,sans-serif" font-size="35" font-weight="700" fill="#19212d">Shiftly · ${year}</text><text x="55" y="92" font-family="Arial,sans-serif" font-size="15" fill="#78818c">${escapeHtml(names.intel)}, ${escapeHtml(names.pfizer)} and ${escapeHtml(names.creche)} shift calendar</text>`;
   for (let month = 0; month < 12; month += 1) {
     const x = startX + (month % columns) * (cardW + gapX), y = startY + Math.floor(month / columns) * (cardH + gapY);
     const first = utcDate(year, month + 1, 1), offset = (first.getUTCDay() + 6) % 7, start = addDays(first, -offset);
     content += `<rect x="${x}" y="${y}" width="${cardW}" height="${cardH}" rx="20" fill="#fff" stroke="#e8e8e4"/><text x="${x + 18}" y="${y + 30}" font-family="Arial,sans-serif" font-size="19" font-weight="700" fill="#19212d">${format(first,{month:'long'})}</text>`;
     ['M','T','W','T','F','S','S'].forEach((label, i) => { content += `<text x="${x + 26 + i * 45}" y="${y + 58}" text-anchor="middle" font-family="Arial" font-size="10" fill="#78818c">${label}</text>`; });
-    for (let index = 0; index < 42; index += 1) { const date = addDays(start, index), shifts = shiftsFor(date), cellX = x + 10 + (index % 7) * 47, cellY = y + 70 + Math.floor(index / 7) * 43, faded = date.getUTCMonth() !== month ? .32 : 1; content += `<g opacity="${faded}"><text x="${cellX + 18}" y="${cellY + 14}" text-anchor="middle" font-family="Arial" font-size="11" font-weight="700" fill="#19212d">${date.getUTCDate()}</text>${Object.entries(shifts).map(([name,type], pos) => `<circle cx="${cellX + 9 + pos * 10}" cy="${cellY + 29}" r="4" fill="${exportColor(type)}"/><text x="${cellX + 9 + pos * 10}" y="${cellY + 31}" text-anchor="middle" font-family="Arial" font-size="5" font-weight="700" fill="#fff">${name.charAt(0).toUpperCase()}</text>`).join('')}</g>`; }
+    for (let index = 0; index < 42; index += 1) { const date = addDays(start, index), shifts = shiftsFor(date), cellX = x + 10 + (index % 7) * 47, cellY = y + 70 + Math.floor(index / 7) * 43, faded = date.getUTCMonth() !== month ? .32 : 1; content += `<g opacity="${faded}"><text x="${cellX + 18}" y="${cellY + 14}" text-anchor="middle" font-family="Arial" font-size="11" font-weight="700" fill="#19212d">${date.getUTCDate()}</text>${Object.entries(shifts).filter(([name]) => state.visibility[name]).map(([name,type], pos) => `<circle cx="${cellX + 9 + pos * 10}" cy="${cellY + 29}" r="4" fill="${exportColor(type)}"/><text x="${cellX + 9 + pos * 10}" y="${cellY + 31}" text-anchor="middle" font-family="Arial" font-size="5" font-weight="700" fill="#fff">${personInitial(names[name])}</text>`).join('')}</g>`; }
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${content}</svg>`;
 }
@@ -238,6 +334,7 @@ setTheme(state.theme);
 document.querySelector('#previousMonth').addEventListener('click', () => { state.displayedMonth = utcDate(state.displayedMonth.getUTCFullYear(), state.displayedMonth.getUTCMonth(), 1); renderMonth(); renderHero(); });
 document.querySelector('#nextMonth').addEventListener('click', () => { state.displayedMonth = utcDate(state.displayedMonth.getUTCFullYear(), state.displayedMonth.getUTCMonth() + 2, 1); renderMonth(); renderHero(); });
 document.querySelector('#todayButton').addEventListener('click', goToday);
+document.querySelector('#themeToggle').addEventListener('change', event => setTheme(event.currentTarget.checked ? 'dark' : 'light'));
 document.querySelector('#settingsButton').addEventListener('click', openSettings);
 document.querySelector('#closeSettings').addEventListener('click', closeSettings);
 document.querySelector('#sheetScrim').addEventListener('click', () => { closeSettings(); closeEditor(); });
@@ -249,3 +346,4 @@ document.querySelector('#exportImage').addEventListener('click', exportImage);
 document.querySelector('#exportPdf').addEventListener('click', exportPdf);
 document.querySelector('#resetAllChanges').addEventListener('click', resetAllChanges);
 render();
+initializeCloudSync();

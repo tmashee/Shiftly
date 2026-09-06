@@ -20,6 +20,8 @@
           <h1>Shiftly</h1>
         </div>
         <div class="header-actions">
+          <span id="themeModeLabel" class="theme-mode-label">Dark</span>
+          <label class="theme-toggle" title="Toggle light or dark mode" aria-label="Toggle light or dark mode"><input id="themeToggle" type="checkbox" /><span class="theme-toggle-track"></span></label>
           <button id="settingsButton" class="settings-button" type="button" aria-label="Open pattern settings">⚙</button>
           <button id="todayButton" class="today-button" type="button">Today</button>
         </div>
@@ -71,23 +73,23 @@
       </div>
       <form id="settingsForm" class="settings-form">
         <p class="settings-intro">Positive numbers are work days; negative numbers are days off.</p>
-        <label>Intel pattern — January to June<input id="intelFirstPattern" required /></label>
-        <label>Intel pattern — July to December<input id="intelSecondPattern" required /></label>
-        <label>Intel anchor date<input id="intelAnchor" type="date" required /></label>
-        <label>Pfizer cycle anchor date<input id="pfizerAnchor" type="date" required /></label>
-        <label>Pfizer shift pattern<input id="pfizerPattern" required aria-describedby="pfizerHelp" /></label>
+        <label id="intelNameLabel">Int calendar name<input id="intelName" maxlength="30" required /></label>
+        <label id="intelFirstPatternLabel">Int pattern — January to June<input id="intelFirstPattern" required /></label>
+        <label id="intelSecondPatternLabel">Int pattern — July to December<input id="intelSecondPattern" required /></label>
+        <label id="intelAnchorLabel">Int anchor date<input id="intelAnchor" type="date" required /></label>
+        <label id="pfizerNameLabel">Pfi calendar name<input id="pfizerName" maxlength="30" required /></label>
+        <label id="pfizerAnchorLabel">Pfi cycle anchor date<input id="pfizerAnchor" type="date" required /></label>
+        <label id="pfizerPatternLabel">Pfi shift pattern<input id="pfizerPattern" required aria-describedby="pfizerHelp" /></label>
         <p class="settings-help" id="pfizerHelp">Use positive numbers for working days and negative numbers for days off. Day and night shifts alternate automatically.</p>
-        <fieldset>
-          <legend>Crèche working days</legend>
-          <div class="weekday-options" id="crecheDays"></div>
-        </fieldset>
-        <label class="theme-setting"><span><strong>Dark mode</strong><small>Use the darker Shiftly appearance.</small></span><input id="themeToggle" type="checkbox" /></label>
+        <label id="crecheNameLabel">Crè calendar name<input id="crecheName" maxlength="30" required /></label>
+        <label id="crecheDaysLabel">Crè working days<input id="crecheDays" required aria-describedby="crecheHelp" /></label>
+        <p class="settings-help" id="crecheHelp">Use comma-separated weekday numbers: 0 is Sunday, 1 is Monday, through 6 is Saturday.</p>
         <div class="export-settings"><p class="export-title">Year export</p><p>Export the displayed calendar year as an image, or open a print-ready version to save as PDF.</p><div class="export-actions"><button id="exportImage" type="button">Download image</button><button id="exportPdf" type="button">Save as PDF</button></div></div>
         <button class="save-button" type="submit">Save schedule</button>
         <button id="resetAllChanges" class="reset-all-button" type="button">Reset all changes</button>
       </form>
     </section>
 
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>
