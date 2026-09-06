@@ -98,6 +98,8 @@ function undoLastChange() {
   document.querySelector('#undoButton').disabled = true;
   saveCloudState();
   render();
+  if (!document.querySelector('#settingsSheet').classList.contains('is-hidden')) openSettings();
+  else if (!document.querySelector('#dayEditor').classList.contains('is-hidden')) openEditor();
 }
 function applyCloudData(data) {
   if (data.settings && typeof data.settings === 'object') state.settings = { ...state.settings, ...data.settings };
@@ -143,6 +145,18 @@ async function signInWithGoogle() {
     currentUserLabel = result.user.displayName || result.user.email || 'Google account';
     updateAuthStatus(result.user);
   } catch (error) {
+    if (error.code === 'auth/credential-already-in-use' || error.code === 'auth/provider-already-linked') {
+      try {
+        const result = await signInWithPopup(firebaseAuth, new GoogleAuthProvider());
+        currentUserId = result.user.uid;
+        currentUserLabel = result.user.displayName || result.user.email || 'Google account';
+        updateAuthStatus(result.user);
+        setSyncStatus('Synced', 'synced');
+        return;
+      } catch (signInError) {
+        console.error('Unable to sign in with Google.', signInError);
+      }
+    }
     alert(error.code === 'auth/popup-closed-by-user' ? 'Google sign-in was cancelled.' : 'Google sign-in was unavailable. Enable Google in Firebase Authentication.');
   }
 }
@@ -338,10 +352,11 @@ function dateFromInput(value) { const [year, month, day] = value.split('-').map(
 function saveSettings(event) {
   event.preventDefault();
   try {
-    rememberUndo();
     const names = { intelName: document.querySelector('#intelName').value.trim(), pfizerName: document.querySelector('#pfizerName').value.trim(), crecheName: document.querySelector('#crecheName').value.trim() };
     if (Object.values(names).some(name => !name)) throw new Error('Calendar names cannot be empty.');
-    state.settings = { ...names, intelFirstPattern: parsePattern(document.querySelector('#intelFirstPattern').value), intelSecondPattern: parsePattern(document.querySelector('#intelSecondPattern').value), intelAnchor: document.querySelector('#intelAnchor').value, pfizerAnchor: document.querySelector('#pfizerAnchor').value, pfizerPattern: parsePattern(document.querySelector('#pfizerPattern').value), crecheDays: parseCrecheDays(document.querySelector('#crecheDays').value) };
+    const nextSettings = { ...names, intelFirstPattern: parsePattern(document.querySelector('#intelFirstPattern').value), intelSecondPattern: parsePattern(document.querySelector('#intelSecondPattern').value), intelAnchor: document.querySelector('#intelAnchor').value, pfizerAnchor: document.querySelector('#pfizerAnchor').value, pfizerPattern: parsePattern(document.querySelector('#pfizerPattern').value), crecheDays: parseCrecheDays(document.querySelector('#crecheDays').value) };
+    rememberUndo();
+    state.settings = nextSettings;
     setTheme(document.querySelector('#themeToggle').checked ? 'dark' : 'light');
     localStorage.setItem('shiftly-settings', JSON.stringify(state.settings)); saveCloudState(); closeSettings(); render();
   } catch (error) { alert(error.message); }
@@ -388,7 +403,10 @@ function unescapeIcs(value) { return value.replace(/\\n/g, '\n').replace(/\\,/g,
 function exportIcs() {
   const events = Object.entries(state.notes).filter(([, note]) => note.type === 'hospital').map(([dateKey, note], index) => {
     const date = dateKey.replace(/-/g, '');
-    return ['BEGIN:VEVENT', `UID:shiftly-${dateKey}-${index}@shiftly`, `DTSTAMP:${date}T000000Z`, `DTSTART;VALUE=DATE:${date}`, 'SUMMARY:Hospital appointment', `DESCRIPTION:${escapeIcs(note.text)}`, 'END:VEVENT'].join('\r\n');
+    const time = String(note.text || '').match(/\b([01]\d|2[0-3]):([0-5]\d)\b/);
+    const location = String(note.text || '').match(/(?:^|[;|\n])\s*location:\s*([^;|\n]+)/i);
+    const start = time ? `DTSTART:${date}T${time[1]}${time[2]}00` : `DTSTART;VALUE=DATE:${date}`;
+    return ['BEGIN:VEVENT', `UID:shiftly-${dateKey}-${index}@shiftly`, `DTSTAMP:${date}T000000Z`, start, 'SUMMARY:Hospital appointment', location ? `LOCATION:${escapeIcs(location[1].trim())}` : '', `DESCRIPTION:${escapeIcs(note.text)}`, 'END:VEVENT'].filter(Boolean).join('\r\n');
   });
   const calendar = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Shiftly//Hospital appointments//EN', ...events, 'END:VCALENDAR'].join('\r\n');
   downloadBlob(new Blob([calendar], { type: 'text/calendar;charset=utf-8' }), 'shiftly-hospital-appointments.ics');
