@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111827" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Shiftly — your shift calendar</title>
+    <link rel="manifest" href="manifest.json" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="overline">MY SCHEDULE</p>
+          <h1>Shiftly</h1>
+        </div>
+        <div class="header-actions">
+          <button id="settingsButton" class="settings-button" type="button" aria-label="Open pattern settings">⚙</button>
+          <button id="todayButton" class="today-button" type="button">Today</button>
+        </div>
+      </header>
+
+      <section class="next-shift" id="nextShift" aria-live="polite"></section>
+
+      <section class="month-panel" aria-label="Calendar">
+        <div class="month-navigation">
+          <button class="nav-button" id="previousMonth" type="button" aria-label="Previous month">←</button>
+          <button class="month-heading" id="monthHeading" type="button" aria-label="Choose current month"></button>
+          <button class="nav-button" id="nextMonth" type="button" aria-label="Next month">→</button>
+        </div>
+        <div class="weekdays" aria-hidden="true">
+          <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
+        </div>
+        <div class="calendar-grid" id="calendarGrid"></div>
+      </section>
+
+      <section class="team-section overlap-section">
+        <div class="section-heading">
+          <div>
+            <p class="overline">MONTHLY VIEW</p>
+            <h2>Shift overlap</h2>
+          </div>
+          <span id="overlapCount" class="count-pill"></span>
+        </div>
+        <div class="overlap-card" id="overlapCard"></div>
+      </section>
+    </main>
+
+    <div class="sheet-scrim is-hidden" id="sheetScrim"></div>
+    <section class="day-sheet is-hidden" id="dayEditor" role="dialog" aria-modal="true" aria-labelledby="dayEditorTitle">
+      <div class="sheet-handle"></div>
+      <div class="sheet-topline">
+        <div>
+          <p class="overline">EDIT SHIFT</p>
+          <h2 id="dayEditorTitle">Selected day</h2>
+        </div>
+        <button id="closeEditor" class="close-button" type="button" aria-label="Close">×</button>
+      </div>
+      <div class="sheet-content" id="editorContent"></div>
+      <section class="note-editor">
+        <label for="noteType">Add to this day</label>
+        <div class="note-fields"><select id="noteType"><option value="leave">Annual leave</option><option value="overtime">Overtime</option><option value="note">Note</option></select><input id="noteText" type="text" placeholder="Optional details" /></div>
+        <button id="saveNote" class="note-save-button" type="button">Save note</button>
+      </section>
+      <button id="resetDay" class="reset-button" type="button">Reset this day to the pattern</button>
+    </section>
+    <section class="day-sheet is-hidden" id="settingsSheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="sheet-handle"></div>
+      <div class="sheet-topline">
+        <div>
+          <p class="overline">SCHEDULE SETUP</p>
+          <h2 id="settingsTitle">Pattern settings</h2>
+        </div>
+        <button id="closeSettings" class="close-button" type="button" aria-label="Close">×</button>
+      </div>
+      <form id="settingsForm" class="settings-form">
+        <p class="settings-intro">Positive numbers are work days; negative numbers are days off.</p>
+        <label>Intel pattern — January to June<input id="intelFirstPattern" required /></label>
+        <label>Intel pattern — July to December<input id="intelSecondPattern" required /></label>
+        <label>Intel anchor date<input id="intelAnchor" type="date" required /></label>
+        <label>Pfizer cycle anchor date<input id="pfizerAnchor" type="date" required /></label>
+        <label>Pfizer shift pattern<input id="pfizerPattern" required aria-describedby="pfizerHelp" /></label>
+        <p class="settings-help" id="pfizerHelp">Use positive numbers for working days and negative numbers for days off. Day and night shifts alternate automatically.</p>
+        <fieldset>
+          <legend>Crèche working days</legend>
+          <div class="weekday-options" id="crecheDays"></div>
+        </fieldset>
+        <label class="theme-setting"><span><strong>Dark mode</strong><small>Use the darker Shiftly appearance.</small></span><input id="themeToggle" type="checkbox" /></label>
+        <div class="export-settings"><p class="export-title">Year export</p><p>Export the displayed calendar year as an image, or open a print-ready version to save as PDF.</p><div class="export-actions"><button id="exportImage" type="button">Download image</button><button id="exportPdf" type="button">Save as PDF</button></div></div>
+        <button class="save-button" type="submit">Save schedule</button>
+      </form>
+    </section>
+
+    <script src="app.js"></script>
+  </body>
+</html>
