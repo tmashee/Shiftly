@@ -22,7 +22,7 @@ const state = {
   settings: { ...DEFAULT_SETTINGS, ...savedSettings, pfizerPattern: savedPfizerPattern },
   overrides: JSON.parse(localStorage.getItem('shiftly-overrides') || '{}'),
   notes: JSON.parse(localStorage.getItem('shiftly-notes') || '{}'),
-  theme: localStorage.getItem('shiftly-theme') || 'light'
+  theme: localStorage.getItem('shiftly-theme') || 'dark'
 };
 
 // Date helpers keep calendar calculations independent of local timezones.
@@ -203,7 +203,7 @@ function resetAllChanges() {
   state.settings = { ...DEFAULT_SETTINGS, intelFirstPattern: [...DEFAULT_SETTINGS.intelFirstPattern], intelSecondPattern: [...DEFAULT_SETTINGS.intelSecondPattern], pfizerPattern: [...DEFAULT_SETTINGS.pfizerPattern], crecheDays: [...DEFAULT_SETTINGS.crecheDays] };
   state.overrides = {};
   state.notes = {};
-  setTheme('light');
+  setTheme('dark');
   localStorage.removeItem('shiftly-settings');
   localStorage.removeItem('shiftly-overrides');
   localStorage.removeItem('shiftly-notes');
