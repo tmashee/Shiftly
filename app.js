@@ -1,3 +1,4 @@
+// Shift status values and default schedule configuration.
 const DAY = 'day';
 const NIGHT = 'night';
 const OFF = 'off';
@@ -11,6 +12,7 @@ const DEFAULT_SETTINGS = {
   crecheDays: [1, 2, 5]
 };
 
+// Restore saved preferences before building the application state.
 const savedSettings = JSON.parse(localStorage.getItem('shiftly-settings') || '{}');
 const savedPfizerPattern = Array.isArray(savedSettings.pfizerPattern) && savedSettings.pfizerPattern.every(Number.isInteger)
   ? savedSettings.pfizerPattern : DEFAULT_SETTINGS.pfizerPattern;
@@ -23,6 +25,7 @@ const state = {
   theme: localStorage.getItem('shiftly-theme') || 'light'
 };
 
+// Date helpers keep calendar calculations independent of local timezones.
 function utcDate(year, month, day) { return new Date(Date.UTC(year, month - 1, day)); }
 function dayKey(date) { return date.toISOString().slice(0, 10); }
 function addDays(date, amount) { const next = new Date(date); next.setUTCDate(next.getUTCDate() + amount); return next; }
@@ -30,6 +33,7 @@ function diffDays(a, b) { return Math.round((b - a) / 86400000); }
 function mod(value, length) { return ((value % length) + length) % length; }
 function format(date, options) { return new Intl.DateTimeFormat('en-IE', { ...options, timeZone: 'UTC' }).format(date); }
 
+// Convert a repeating pattern into a day, night, or off shift.
 function patternShift(date, pattern, anchor, switchDays, startsWithDay) {
   const difference = diffDays(anchor, date);
   const cycleLength = pattern.reduce((sum, segment) => sum + Math.abs(segment), 0);
@@ -48,6 +52,7 @@ function patternShift(date, pattern, anchor, switchDays, startsWithDay) {
   return OFF;
 }
 
+// Calculate each schedule from its configured pattern.
 function intel(date) {
   const july = utcDate(date.getUTCFullYear(), 7, 1);
   return date >= july
@@ -80,6 +85,7 @@ function creche(date) {
   return state.settings.crecheDays.includes(date.getUTCDay()) ? CRECHE : OFF;
 }
 
+// Combine calculated shifts with any date-specific overrides.
 function shiftsFor(date) {
   const override = state.overrides[dayKey(date)] || {};
   return { intel: override.intel || intel(date), pfizer: override.pfizer || pfizer(date), creche: override.creche || creche(date) };
@@ -89,8 +95,10 @@ function typeLabel(type) { return ({ day: 'DAY', night: 'NIGHT', off: 'OFF', cre
 function statusDescription(type) { return ({ day: 'Day shift', night: 'Night shift', off: 'Rest day', creche: 'Crèche' })[type]; }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]); }
 
-function render() { renderHero(); renderMonth(); renderOverlap(); }
+// Refresh all visible calendar content after state changes.
+function render() { renderHero(); renderMonth(); }
 
+// Render the selected-day summary and monthly overlap count.
 function renderHero() {
   const date = state.selectedDate;
   const shifts = shiftsFor(date);
@@ -98,10 +106,19 @@ function renderHero() {
   const active = Object.entries(shifts).filter(([, type]) => type !== OFF);
   const title = active.length ? `${active.length} shift${active.length > 1 ? 's' : ''} today` : 'A day to recharge';
   const isToday = dayKey(date) === dayKey(todayUTC());
-  document.querySelector('#nextShift').innerHTML = `<p class="overline">${isToday ? 'TODAY · ' : ''}${format(date, { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase()}</p><div class="shift-main"><div><p class="shift-name">${isToday ? title : 'Pattern for this day'}</p><p class="shift-meta">${active.length ? `${active.length} scheduled` : 'No scheduled shifts'}</p></div><div class="shift-mark">${active.length ? '✦' : '☼'}</div></div><div class="selected-shifts">${Object.entries(shifts).map(([name, type]) => `<div class="selected-shift ${type}"><strong>${name.charAt(0).toUpperCase()} · ${PEOPLE[name]}</strong><span>${typeLabel(type)}</span></div>`).join('')}</div>${note?.text ? `<p class="selected-note"><strong>${note.type === 'note' ? 'NOTE' : typeLabel(note.type) || note.type.toUpperCase()}</strong> ${escapeHtml(note.text)}</p>` : ''}<button id="editDayButton" class="edit-day-button" type="button">Edit selected day</button>`;
+  const month = state.displayedMonth;
+  const days = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
+  let overlapCount = 0;
+  for (let day = 1; day <= days; day += 1) {
+    const monthDate = utcDate(month.getUTCFullYear(), month.getUTCMonth() + 1, day);
+    const monthShifts = shiftsFor(monthDate);
+    if (monthShifts.intel !== OFF && monthShifts.pfizer !== OFF) overlapCount += 1;
+  }
+  document.querySelector('#nextShift').innerHTML = `<p class="overline">${isToday ? 'TODAY · ' : ''}${format(date, { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase()}</p><div class="shift-main"><div><p class="shift-name">${isToday ? title : 'Pattern for this day'}</p><p class="shift-meta">${active.length ? `${active.length} scheduled` : 'No scheduled shifts'}</p></div><div class="header-summary"><span class="overlap-summary" aria-label="${overlapCount} shift overlap days">${overlapCount} overlap</span></div></div><div class="selected-shifts">${Object.entries(shifts).map(([name, type]) => `<div class="selected-shift ${type}"><strong>${name.charAt(0).toUpperCase()} · ${PEOPLE[name]}</strong><span>${typeLabel(type)}</span></div>`).join('')}</div>${note?.text ? `<p class="selected-note"><strong>${note.type === 'note' ? 'NOTE' : typeLabel(note.type) || note.type.toUpperCase()}</strong> ${escapeHtml(note.text)}</p>` : ''}<button id="editDayButton" class="edit-day-button" type="button">Edit selected day</button>`;
   document.querySelector('#editDayButton').addEventListener('click', openEditor);
 }
 
+// Build the calendar grid, including notes, markers, and overlaps.
 function renderMonth() {
   const view = state.displayedMonth;
   document.querySelector('#monthHeading').textContent = format(view, { month: 'long', year: 'numeric' });
@@ -124,21 +141,9 @@ function renderMonth() {
   }
 }
 
-function renderOverlap() {
-  const month = state.displayedMonth;
-  const days = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
-  const overlaps = [];
-  for (let day = 1; day <= days; day += 1) {
-    const date = utcDate(month.getUTCFullYear(), month.getUTCMonth() + 1, day);
-    const shifts = shiftsFor(date);
-    if (shifts.intel !== OFF && shifts.pfizer !== OFF) overlaps.push(day);
-  }
-  const count = overlaps.length;
-  document.querySelector('#overlapCount').textContent = `${count} day${count === 1 ? '' : 's'}`;
-  document.querySelector('#overlapCard').innerHTML = `<div class="overlap-number">${count}</div><div><strong>Intel & Pfizer both working</strong><p>${count ? `They overlap on ${overlaps.join(', ')} ${format(month, { month: 'long' })}.` : `No shared working days in ${format(month, { month: 'long' })}.`}</p></div>`;
-}
-
+// Update the selected day and return the view to the top.
 function selectDay(date) { state.selectedDate = date; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+// Open and populate the schedule settings sheet.
 function openSettings() {
   const settings = state.settings;
   document.querySelector('#intelFirstPattern').value = settings.intelFirstPattern.join(', ');
@@ -151,6 +156,7 @@ function openSettings() {
   document.querySelector('#sheetScrim').classList.remove('is-hidden'); document.querySelector('#settingsSheet').classList.remove('is-hidden');
 }
 function closeSettings() { document.querySelector('#sheetScrim').classList.add('is-hidden'); document.querySelector('#settingsSheet').classList.add('is-hidden'); }
+// Open the selected-day editor with current shifts and note details.
 function openEditor() {
   const date = state.selectedDate; const shifts = shiftsFor(date);
   document.querySelector('#dayEditorTitle').textContent = format(date, { day: 'numeric', month: 'long' });
@@ -165,6 +171,7 @@ function openEditor() {
   document.querySelector('#sheetScrim').classList.remove('is-hidden'); document.querySelector('#dayEditor').classList.remove('is-hidden');
 }
 function closeEditor() { document.querySelector('#sheetScrim').classList.add('is-hidden'); document.querySelector('#dayEditor').classList.add('is-hidden'); }
+// Keep generated leave/overtime notes synchronized with shift overrides.
 function syncAutomaticNote(key, date) {
   const override = state.overrides[key] || {};
   const toggledPeople = ['intel', 'pfizer'].filter(person => override[person] && override[person] !== ({ intel, pfizer, creche })[person](date));
@@ -175,11 +182,13 @@ function syncAutomaticNote(key, date) {
     state.notes[key] = { type: allOff ? 'leave' : 'overtime', text: toggledPeople.map(person => `${PEOPLE[person]} ${override[person] === OFF ? 'Leave' : 'OT'}`).join(', '), automatic: true };
   } else if (isAutomatic) delete state.notes[key];
 }
+// Save a shift toggle, or remove it when the original pattern is selected.
 function saveDayOverride(event) { const { person, type } = event.currentTarget.dataset; const key = dayKey(state.selectedDate); const originalType = ({ intel, pfizer, creche })[person](state.selectedDate); if (type === originalType) { if (state.overrides[key]) { delete state.overrides[key][person]; if (!Object.keys(state.overrides[key]).length) delete state.overrides[key]; } } else { state.overrides[key] = { ...(state.overrides[key] || {}), [person]: type }; } syncAutomaticNote(key, state.selectedDate); localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); openEditor(); render(); }
 function resetSelectedDay() { const key = dayKey(state.selectedDate); delete state.overrides[key]; delete state.notes[key]; localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); closeEditor(); render(); }
 function saveNote() { const type = document.querySelector('#noteType').value; const text = document.querySelector('#noteText').value.trim(); state.notes[dayKey(state.selectedDate)] = { type, text }; localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); closeEditor(); render(); }
 function parsePattern(value) { const pattern = value.split(',').map(item => Number(item.trim())); if (!pattern.length || pattern.some(item => !Number.isInteger(item) || item === 0)) throw new Error('Use comma-separated non-zero whole numbers.'); return pattern; }
 function dateFromInput(value) { const [year, month, day] = value.split('-').map(Number); return utcDate(year, month, day); }
+// Validate and persist edited patterns and appearance settings.
 function saveSettings(event) {
   event.preventDefault();
   try {
@@ -188,6 +197,7 @@ function saveSettings(event) {
     localStorage.setItem('shiftly-settings', JSON.stringify(state.settings)); closeSettings(); render();
   } catch (error) { alert(error.message); }
 }
+// Restore defaults and remove every saved calendar customization.
 function resetAllChanges() {
   if (!confirm('Reset patterns, shift changes, notes, and theme to the defaults?')) return;
   state.settings = { ...DEFAULT_SETTINGS, intelFirstPattern: [...DEFAULT_SETTINGS.intelFirstPattern], intelSecondPattern: [...DEFAULT_SETTINGS.intelSecondPattern], pfizerPattern: [...DEFAULT_SETTINGS.pfizerPattern], crecheDays: [...DEFAULT_SETTINGS.crecheDays] };
@@ -204,6 +214,7 @@ function todayUTC() { const local = new Date(); return utcDate(local.getFullYear
 function goToday() { const today = todayUTC(); state.displayedMonth = utcDate(today.getUTCFullYear(), today.getUTCMonth() + 1, 1); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 function setTheme(theme) { state.theme = theme; document.documentElement.dataset.theme = theme; localStorage.setItem('shiftly-theme', theme); }
 function exportColor(type) { return ({ day: '#ffb36b', night: '#6e5ae6', off: '#e4e6e3', creche: '#f47e96' })[type]; }
+// Create the SVG used by image and print/PDF exports.
 function yearSvg(year) {
   const width = 1200, height = 1540, columns = 3, cardW = 350, cardH = 345, gapX = 35, gapY = 35, startX = 55, startY = 120;
   let content = `<rect width="${width}" height="${height}" fill="#f8f8f6"/><text x="55" y="65" font-family="Arial,sans-serif" font-size="35" font-weight="700" fill="#19212d">Shiftly · ${year}</text><text x="55" y="92" font-family="Arial,sans-serif" font-size="15" fill="#78818c">Intel, Pfizer and Crèche shift calendar</text>`;
@@ -220,11 +231,12 @@ function downloadBlob(blob, filename) { const link = document.createElement('a')
 function exportImage() { const year = state.displayedMonth.getUTCFullYear(), svg = yearSvg(year), image = new Image(); image.onload = () => { const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 1540; canvas.getContext('2d').drawImage(image, 0, 0); canvas.toBlob(blob => downloadBlob(blob, `shiftly-${year}.png`), 'image/png'); }; image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`; }
 function exportPdf() { const year = state.displayedMonth.getUTCFullYear(), svg = yearSvg(year), printWindow = window.open('', '_blank'); if (!printWindow) return; printWindow.document.write(`<title>Shiftly ${year}</title><style>@page{size:A4 portrait;margin:8mm}body{margin:0}img{display:block;width:100%;height:auto}</style><img src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}">`); printWindow.document.close(); printWindow.onload = () => printWindow.print(); }
 
+// Register the offline app shell when served over HTTP(S).
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js');
 setTheme(state.theme);
 
-document.querySelector('#previousMonth').addEventListener('click', () => { state.displayedMonth = utcDate(state.displayedMonth.getUTCFullYear(), state.displayedMonth.getUTCMonth(), 1); renderMonth(); renderOverlap(); });
-document.querySelector('#nextMonth').addEventListener('click', () => { state.displayedMonth = utcDate(state.displayedMonth.getUTCFullYear(), state.displayedMonth.getUTCMonth() + 2, 1); renderMonth(); renderOverlap(); });
+document.querySelector('#previousMonth').addEventListener('click', () => { state.displayedMonth = utcDate(state.displayedMonth.getUTCFullYear(), state.displayedMonth.getUTCMonth(), 1); renderMonth(); renderHero(); });
+document.querySelector('#nextMonth').addEventListener('click', () => { state.displayedMonth = utcDate(state.displayedMonth.getUTCFullYear(), state.displayedMonth.getUTCMonth() + 2, 1); renderMonth(); renderHero(); });
 document.querySelector('#todayButton').addEventListener('click', goToday);
 document.querySelector('#settingsButton').addEventListener('click', openSettings);
 document.querySelector('#closeSettings').addEventListener('click', closeSettings);

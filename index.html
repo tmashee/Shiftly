@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <!-- Main calendar view and selected-day summary. -->
     <main class="app-shell">
       <header class="app-header">
         <div>
@@ -38,18 +39,9 @@
         <div class="calendar-grid" id="calendarGrid"></div>
       </section>
 
-      <section class="team-section overlap-section">
-        <div class="section-heading">
-          <div>
-            <p class="overline">MONTHLY VIEW</p>
-            <h2>Shift overlap</h2>
-          </div>
-          <span id="overlapCount" class="count-pill"></span>
-        </div>
-        <div class="overlap-card" id="overlapCard"></div>
-      </section>
     </main>
 
+    <!-- Shared scrim and bottom sheets for day editing and settings. -->
     <div class="sheet-scrim is-hidden" id="sheetScrim"></div>
     <section class="day-sheet is-hidden" id="dayEditor" role="dialog" aria-modal="true" aria-labelledby="dayEditorTitle">
       <div class="sheet-handle"></div>
