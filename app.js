@@ -65,20 +65,15 @@ const state = {
   theme: localStorage.getItem('shiftly-theme') === 'light' ? 'light' : 'dark'
 };
 
-function cloudData() { return { settings: state.settings, overrides: state.overrides, notes: state.notes, visibility: state.visibility, theme: state.theme }; }
+function cloudData() { return { settings: state.settings, overrides: state.overrides, notes: state.notes }; }
 function saveCloudState() { if (cloudReady) setDoc(cloudDocument, cloudData()).catch(error => console.error('Unable to sync Shiftly data.', error)); }
 function applyCloudData(data) {
   if (data.settings && typeof data.settings === 'object') state.settings = { ...state.settings, ...data.settings };
   if (data.overrides && typeof data.overrides === 'object') state.overrides = data.overrides;
   if (data.notes && typeof data.notes === 'object') state.notes = data.notes;
-  if (data.visibility && typeof data.visibility === 'object') state.visibility = { ...state.visibility, ...data.visibility };
-  if (data.theme === 'light' || data.theme === 'dark') state.theme = data.theme;
   localStorage.setItem('shiftly-settings', JSON.stringify(state.settings));
   localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides));
   localStorage.setItem('shiftly-notes', JSON.stringify(state.notes));
-  localStorage.setItem('shiftly-calendar-visibility', JSON.stringify(state.visibility));
-  localStorage.setItem('shiftly-theme', state.theme);
-  setTheme(state.theme);
   render();
 }
 async function initializeCloudSync() {
