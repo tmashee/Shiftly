@@ -188,6 +188,18 @@ function saveSettings(event) {
     localStorage.setItem('shiftly-settings', JSON.stringify(state.settings)); closeSettings(); render();
   } catch (error) { alert(error.message); }
 }
+function resetAllChanges() {
+  if (!confirm('Reset patterns, shift changes, notes, and theme to the defaults?')) return;
+  state.settings = { ...DEFAULT_SETTINGS, intelFirstPattern: [...DEFAULT_SETTINGS.intelFirstPattern], intelSecondPattern: [...DEFAULT_SETTINGS.intelSecondPattern], pfizerPattern: [...DEFAULT_SETTINGS.pfizerPattern], crecheDays: [...DEFAULT_SETTINGS.crecheDays] };
+  state.overrides = {};
+  state.notes = {};
+  setTheme('light');
+  localStorage.removeItem('shiftly-settings');
+  localStorage.removeItem('shiftly-overrides');
+  localStorage.removeItem('shiftly-notes');
+  openSettings();
+  render();
+}
 function todayUTC() { const local = new Date(); return utcDate(local.getFullYear(), local.getMonth() + 1, local.getDate()); }
 function goToday() { const today = todayUTC(); state.displayedMonth = utcDate(today.getUTCFullYear(), today.getUTCMonth() + 1, 1); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 function setTheme(theme) { state.theme = theme; document.documentElement.dataset.theme = theme; localStorage.setItem('shiftly-theme', theme); }
@@ -223,4 +235,5 @@ document.querySelector('#resetDay').addEventListener('click', resetSelectedDay);
 document.querySelector('#saveNote').addEventListener('click', saveNote);
 document.querySelector('#exportImage').addEventListener('click', exportImage);
 document.querySelector('#exportPdf').addEventListener('click', exportPdf);
+document.querySelector('#resetAllChanges').addEventListener('click', resetAllChanges);
 render();
