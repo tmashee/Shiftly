@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, linkWithPopup, signInAnonymously, signInWithPopup } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
+import { browserLocalPersistence, getAuth, GoogleAuthProvider, linkWithPopup, setPersistence, signInAnonymously, signInWithPopup, signOut } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
 import { doc, getFirestore, onSnapshot, setDoc } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js';
 
 const firebaseConfig = {
@@ -20,6 +20,7 @@ let currentUserId;
 let currentUserLabel = 'Anonymous device';
 let undoSnapshot;
 let cloudWriteQueue = Promise.resolve();
+let stopCloudListener;
 
 // Shift status values and default schedule configuration.
 const DAY = 'day';
@@ -75,7 +76,7 @@ function saveCloudState() {
   if (!cloudReady) return;
   setSyncStatus('Saving', 'saving');
   const payload = cloudData();
-  cloudWriteQueue = cloudWriteQueue.then(() => setDoc(cloudDocument, payload)).then(() => setSyncStatus('Synced', 'synced')).catch(error => { setSyncStatus('Offline', 'offline'); console.error('Unable to sync Shiftly data.', error); });
+  cloudWriteQueue = cloudWriteQueue.then(() => setDoc(cloudDocument, payload)).then(() => setSyncStatus('Synced', 'synced')).catch(error => { setSyncStatus(error.code === 'permission-denied' ? 'Sign in' : 'Offline', 'offline'); const authStatus = document.querySelector('#authStatus'); if (authStatus && error.code === 'permission-denied') authStatus.textContent = 'Google sign-in is required to save changes.'; console.error('Unable to sync Shiftly data.', error); });
 }
 function rememberUndo() { undoSnapshot = { kind: 'all', data: JSON.parse(JSON.stringify({ settings: state.settings, overrides: state.overrides, notes: state.notes })) }; const button = document.querySelector('#undoButton'); if (button) button.disabled = false; }
 function rememberDayUndo(key) { undoSnapshot = { kind: 'day', key, override: state.overrides[key] ? JSON.parse(JSON.stringify(state.overrides[key])) : null, note: state.notes[key] ? JSON.parse(JSON.stringify(state.notes[key])) : null }; const button = document.querySelector('#undoButton'); if (button) button.disabled = false; }
@@ -118,20 +119,26 @@ function applyCloudData(data) {
   localStorage.setItem('shiftly-notes', JSON.stringify(state.notes));
   render();
 }
+function listenForCloudState() {
+  if (stopCloudListener) stopCloudListener();
+  stopCloudListener = onSnapshot(cloudDocument, snapshot => {
+    cloudReady = true;
+    setSyncStatus('Synced', 'synced');
+    if (snapshot.exists()) applyCloudData(snapshot.data());
+    else if (firebaseAuth.currentUser?.isAnonymous) setSyncStatus('Sign in', 'offline');
+    else saveCloudState();
+  }, error => { cloudReady = false; setSyncStatus(error.code === 'permission-denied' ? 'Sign in' : 'Offline', 'offline'); const authStatus = document.querySelector('#authStatus'); if (authStatus && error.code === 'permission-denied') authStatus.textContent = 'Google sign-in is required to sync changes.'; console.error('Unable to listen for Shiftly updates.', error); });
+}
 async function initializeCloudSync() {
   try {
-    const credential = await signInAnonymously(firebaseAuth);
+    await setPersistence(firebaseAuth, browserLocalPersistence);
+    await firebaseAuth.authStateReady();
+    const credential = firebaseAuth.currentUser ? { user: firebaseAuth.currentUser } : await signInAnonymously(firebaseAuth);
     currentUserId = credential.user.uid;
     currentUserLabel = credential.user.displayName || credential.user.email || 'Anonymous device';
     updateAuthStatus(credential.user);
     cloudDocument = doc(firestore, 'shared', 'schedule');
-    onSnapshot(cloudDocument, snapshot => {
-      cloudReady = true;
-      setSyncStatus('Synced', 'synced');
-      if (snapshot.exists()) applyCloudData(snapshot.data());
-      else if (firebaseAuth.currentUser?.isAnonymous) setSyncStatus('Sign in', 'offline');
-      else saveCloudState();
-    }, error => { setSyncStatus('Offline', 'offline'); console.error('Unable to listen for Shiftly updates.', error); });
+    listenForCloudState();
   } catch (error) {
     setSyncStatus(error.code === 'auth/operation-not-allowed' ? 'Sign in' : 'Offline', 'offline');
     const authStatus = document.querySelector('#authStatus');
@@ -149,6 +156,7 @@ async function signInWithGoogle() {
     updateAuthStatus(result.user);
     if (!cloudDocument) cloudDocument = doc(firestore, 'shared', 'schedule');
     cloudReady = true;
+    listenForCloudState();
     saveCloudState();
   } catch (error) {
     if (error.code === 'auth/credential-already-in-use' || error.code === 'auth/provider-already-linked') {
@@ -158,6 +166,9 @@ async function signInWithGoogle() {
         currentUserLabel = result.user.displayName || result.user.email || 'Google account';
         updateAuthStatus(result.user);
         setSyncStatus('Synced', 'synced');
+        if (!cloudDocument) cloudDocument = doc(firestore, 'shared', 'schedule');
+        cloudReady = true;
+        listenForCloudState();
         return;
       } catch (signInError) {
         console.error('Unable to sign in with Google.', signInError);
@@ -166,7 +177,8 @@ async function signInWithGoogle() {
     alert(error.code === 'auth/popup-closed-by-user' ? 'Google sign-in was cancelled.' : 'Google sign-in was unavailable. Enable Google in Firebase Authentication.');
   }
 }
-function updateAuthStatus(user) { const identity = user?.displayName || user?.email || 'Google account'; const element = document.querySelector('#authStatus'); const button = document.querySelector('#googleSignIn'); if (element) element.textContent = user?.isAnonymous ? 'Anonymous sync is active on this device.' : `Signed in as ${identity}.`; if (button) button.textContent = user?.isAnonymous ? 'Continue with Google' : identity; }
+function updateAuthStatus(user) { const identity = user?.displayName || user?.email || 'Google account'; const element = document.querySelector('#authStatus'); const button = document.querySelector('#googleSignIn'); const signOutButton = document.querySelector('#signOutButton'); const isAnonymous = !user || user.isAnonymous; if (element) element.textContent = isAnonymous ? 'Anonymous sync is active on this device.' : `Signed in as ${identity}.`; if (button) { button.textContent = isAnonymous ? 'Continue with Google' : identity; button.classList.toggle('is-hidden', !isAnonymous); } if (signOutButton) signOutButton.classList.toggle('is-hidden', isAnonymous); }
+async function signOutUser() { await signOut(firebaseAuth); currentUserId = null; currentUserLabel = 'Anonymous device'; cloudReady = false; if (stopCloudListener) stopCloudListener(); stopCloudListener = null; updateAuthStatus({ isAnonymous: true }); setSyncStatus('Signed out', 'offline'); }
 
 function people() { return { intel: state.settings.intelName, pfizer: state.settings.pfizerName, creche: state.settings.crecheName }; }
 function personInitial(name) { return name.trim().charAt(0).toUpperCase(); }
@@ -468,6 +480,7 @@ document.querySelector('#exportImage').addEventListener('click', exportImage);
 document.querySelector('#exportPdf').addEventListener('click', exportPdf);
 document.querySelector('#resetAllChanges').addEventListener('click', resetAllChanges);
 document.querySelector('#googleSignIn').addEventListener('click', signInWithGoogle);
+document.querySelector('#signOutButton').addEventListener('click', signOutUser);
 document.querySelector('#exportIcs').addEventListener('click', exportIcs);
 document.querySelector('#importIcs').addEventListener('change', importIcs);
 render();
