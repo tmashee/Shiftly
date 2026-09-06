@@ -129,10 +129,13 @@ async function initializeCloudSync() {
       cloudReady = true;
       setSyncStatus('Synced', 'synced');
       if (snapshot.exists()) applyCloudData(snapshot.data());
+      else if (firebaseAuth.currentUser?.isAnonymous) setSyncStatus('Sign in', 'offline');
       else saveCloudState();
     }, error => { setSyncStatus('Offline', 'offline'); console.error('Unable to listen for Shiftly updates.', error); });
   } catch (error) {
-    setSyncStatus('Offline', 'offline');
+    setSyncStatus(error.code === 'auth/operation-not-allowed' ? 'Sign in' : 'Offline', 'offline');
+    const authStatus = document.querySelector('#authStatus');
+    if (authStatus && error.code === 'auth/operation-not-allowed') authStatus.textContent = 'Google sign-in is required for cloud sync.';
     console.error('Shiftly cloud sync is unavailable.', error);
   }
 }
@@ -144,6 +147,9 @@ async function signInWithGoogle() {
     currentUserId = result.user.uid;
     currentUserLabel = result.user.displayName || result.user.email || 'Google account';
     updateAuthStatus(result.user);
+    if (!cloudDocument) cloudDocument = doc(firestore, 'shared', 'schedule');
+    cloudReady = true;
+    saveCloudState();
   } catch (error) {
     if (error.code === 'auth/credential-already-in-use' || error.code === 'auth/provider-already-linked') {
       try {
@@ -160,7 +166,7 @@ async function signInWithGoogle() {
     alert(error.code === 'auth/popup-closed-by-user' ? 'Google sign-in was cancelled.' : 'Google sign-in was unavailable. Enable Google in Firebase Authentication.');
   }
 }
-function updateAuthStatus(user) { const element = document.querySelector('#authStatus'); if (element) element.textContent = user?.isAnonymous ? 'Anonymous sync is active on this device.' : `Signed in as ${user.displayName || user.email || 'Google account'}.`; }
+function updateAuthStatus(user) { const identity = user?.displayName || user?.email || 'Google account'; const element = document.querySelector('#authStatus'); const button = document.querySelector('#googleSignIn'); if (element) element.textContent = user?.isAnonymous ? 'Anonymous sync is active on this device.' : `Signed in as ${identity}.`; if (button) button.textContent = user?.isAnonymous ? 'Continue with Google' : identity; }
 
 function people() { return { intel: state.settings.intelName, pfizer: state.settings.pfizerName, creche: state.settings.crecheName }; }
 function personInitial(name) { return name.trim().charAt(0).toUpperCase(); }
@@ -461,7 +467,6 @@ document.querySelector('#noteType').addEventListener('change', updateNotePlaceho
 document.querySelector('#exportImage').addEventListener('click', exportImage);
 document.querySelector('#exportPdf').addEventListener('click', exportPdf);
 document.querySelector('#resetAllChanges').addEventListener('click', resetAllChanges);
-document.querySelector('#undoButton').addEventListener('click', undoLastChange);
 document.querySelector('#googleSignIn').addEventListener('click', signInWithGoogle);
 document.querySelector('#exportIcs').addEventListener('click', exportIcs);
 document.querySelector('#importIcs').addEventListener('change', importIcs);
