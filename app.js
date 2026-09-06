@@ -178,7 +178,20 @@ async function signInWithGoogle() {
   }
 }
 function updateAuthStatus(user) { const identity = user?.displayName || user?.email || 'Google account'; const element = document.querySelector('#authStatus'); const button = document.querySelector('#googleSignIn'); const signOutButton = document.querySelector('#signOutButton'); const isAnonymous = !user || user.isAnonymous; if (element) element.textContent = isAnonymous ? 'Anonymous sync is active on this device.' : `Signed in as ${identity}.`; if (button) { button.textContent = isAnonymous ? 'Continue with Google' : identity; button.classList.toggle('is-hidden', !isAnonymous); } if (signOutButton) signOutButton.classList.toggle('is-hidden', isAnonymous); }
-async function signOutUser() { await signOut(firebaseAuth); currentUserId = null; currentUserLabel = 'Anonymous device'; cloudReady = false; if (stopCloudListener) stopCloudListener(); stopCloudListener = null; updateAuthStatus({ isAnonymous: true }); setSyncStatus('Signed out', 'offline'); }
+async function signOutUser() {
+  await signOut(firebaseAuth);
+  currentUserId = null;
+  currentUserLabel = 'Anonymous device';
+  cloudReady = false;
+  if (stopCloudListener) stopCloudListener();
+  stopCloudListener = null;
+  updateAuthStatus({ isAnonymous: true });
+  setSyncStatus('Loading', 'saving');
+  const credential = await signInAnonymously(firebaseAuth);
+  currentUserId = credential.user.uid;
+  cloudDocument = doc(firestore, 'shared', 'schedule');
+  listenForCloudState();
+}
 
 function people() { return { intel: state.settings.intelName, pfizer: state.settings.pfizerName, creche: state.settings.crecheName }; }
 function personInitial(name) { return name.trim().charAt(0).toUpperCase(); }
@@ -329,6 +342,8 @@ function openSettings() {
   document.querySelector('#sheetScrim').classList.remove('is-hidden'); document.querySelector('#settingsSheet').classList.remove('is-hidden');
 }
 function closeSettings() { document.querySelector('#sheetScrim').classList.add('is-hidden'); document.querySelector('#settingsSheet').classList.add('is-hidden'); }
+function openHelp() { document.querySelector('#sheetScrim').classList.remove('is-hidden'); document.querySelector('#helpSheet').classList.remove('is-hidden'); }
+function closeHelp() { document.querySelector('#sheetScrim').classList.add('is-hidden'); document.querySelector('#helpSheet').classList.add('is-hidden'); }
 // Open the selected-day editor with current shifts and note details.
 function openEditor() {
   const date = state.selectedDate; const shifts = shiftsFor(date);
@@ -470,7 +485,9 @@ document.querySelector('#todayButton').addEventListener('click', goToday);
 document.querySelector('#themeToggle').addEventListener('change', event => setTheme(event.currentTarget.checked ? 'dark' : 'light'));
 document.querySelector('#settingsButton').addEventListener('click', openSettings);
 document.querySelector('#closeSettings').addEventListener('click', closeSettings);
-document.querySelector('#sheetScrim').addEventListener('click', () => { closeSettings(); closeEditor(); });
+document.querySelector('#sheetScrim').addEventListener('click', () => { closeSettings(); closeEditor(); closeHelp(); });
+document.querySelector('#helpButton').addEventListener('click', openHelp);
+document.querySelector('#closeHelp').addEventListener('click', closeHelp);
 document.querySelector('#settingsForm').addEventListener('submit', saveSettings);
 document.querySelector('#closeEditor').addEventListener('click', closeEditor);
 document.querySelector('#resetDay').addEventListener('click', resetSelectedDay);

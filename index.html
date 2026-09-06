@@ -24,6 +24,7 @@
           <span id="themeModeLabel" class="theme-mode-label">Dark</span>
           <label class="theme-toggle" title="Toggle light or dark mode" aria-label="Toggle light or dark mode"><input id="themeToggle" type="checkbox" /><span class="theme-toggle-track"></span></label>
           <button id="settingsButton" class="settings-button" type="button" aria-label="Open pattern settings">⚙</button>
+          <button id="helpButton" class="settings-button" type="button" aria-label="Open help">?</button>
           <button id="todayButton" class="today-button" type="button">Today</button>
         </div>
       </header>
@@ -83,6 +84,11 @@
         <button class="save-button" type="submit">Save schedule</button>
         <button id="resetAllChanges" class="reset-all-button" type="button">Reset all changes</button>
       </form>
+    </section>
+    <section class="day-sheet is-hidden help-sheet" id="helpSheet" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <div class="sheet-handle"></div>
+      <div class="sheet-topline"><div><p class="overline">QUICK GUIDE</p><h2 id="helpTitle">Using Shiftly</h2></div><button id="closeHelp" class="close-button" type="button" aria-label="Close help">×</button></div>
+      <div class="help-content"><p><strong>View the calendar:</strong> Shiftly signs you in anonymously so you can see shared updates. Google sign-in is required to save changes.</p><p><strong>Edit a day:</strong> Select a date, choose a shift state, or add a note. Hospital appointments can be exported as an <code>.ics</code> file.</p><p><strong>Move between months:</strong> Use the arrows or swipe left and right on the calendar.</p><p><strong>Sync:</strong> <em>Synced</em> means the latest calendar data is connected to Firebase. Changes from the other device appear automatically.</p></div>
     </section>
 
     <script type="module" src="app.js"></script>
