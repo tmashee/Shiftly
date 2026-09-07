@@ -42,6 +42,7 @@
           <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
         </div>
         <div class="calendar-grid" id="calendarGrid"></div>
+        <button class="add-day-button" id="addDayButton" type="button" aria-label="Add to selected day">+</button>
       </section>
 
     </main>
@@ -59,8 +60,7 @@
       </div>
       <div class="sheet-content" id="editorContent"></div>
       <section class="note-editor">
-        <label for="noteType">Add to this day</label>
-        <div class="note-fields"><select id="noteType"><option value="leave">Annual leave</option><option value="hospital">Hospital appointment</option><option value="note">Note</option><option value="overtime">Overtime</option></select><input id="noteText" type="text" placeholder="Optional details" /></div>
+        <fieldset class="appointment-fields"><legend>Appointment details</legend><label for="noteDate">Date<input id="noteDate" type="date" readonly /></label><label for="noteTitle">Title<input id="noteTitle" type="text" placeholder="Appointment title" /></label><label for="noteTime">Time<input id="noteTime" type="time" /></label><label for="noteLocation">Location<input id="noteLocation" type="text" placeholder="Location" /></label></fieldset>
         <button id="saveNote" class="note-save-button" type="button">Save note</button>
       </section>
       <button id="resetDay" class="reset-button" type="button">Reset this day to the pattern</button>

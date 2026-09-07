@@ -18,6 +18,8 @@ let cloudDocument;
 let cloudReady = false;
 let currentUserId;
 let currentUserLabel = 'Anonymous device';
+let lastLocalUpdateAt = 0;
+let lastCalendarClick = { key: '', time: 0 };
 let undoSnapshot;
 let cloudWriteQueue = Promise.resolve();
 let stopCloudListener;
@@ -71,11 +73,13 @@ const state = {
 };
 
 function setSyncStatus(label, stateClass = '') { const element = document.querySelector('#syncStatus'); if (element) { element.textContent = label; element.className = `sync-status ${stateClass}`; } }
-function cloudData() { return { settings: state.settings, overrides: state.overrides, notes: state.notes, syncMeta: { updatedAt: new Date().toISOString(), updatedBy: currentUserId || 'unknown', updatedByLabel: currentUserLabel } }; }
+function cloudData(updatedAt) { return { settings: state.settings, overrides: state.overrides, notes: state.notes, syncMeta: { updatedAt, updatedBy: currentUserId || 'unknown', updatedByLabel: currentUserLabel } }; }
 function saveCloudState() {
   if (!cloudReady) return;
   setSyncStatus('Saving', 'saving');
-  const payload = cloudData();
+  const updatedAt = new Date().toISOString();
+  lastLocalUpdateAt = Date.parse(updatedAt);
+  const payload = cloudData(updatedAt);
   cloudWriteQueue = cloudWriteQueue.then(() => setDoc(cloudDocument, payload)).then(() => setSyncStatus('Synced', 'synced')).catch(error => { setSyncStatus(error.code === 'permission-denied' ? 'Sign in' : 'Offline', 'offline'); const authStatus = document.querySelector('#authStatus'); if (authStatus && error.code === 'permission-denied') authStatus.textContent = 'Google sign-in is required to save changes.'; console.error('Unable to sync Shiftly data.', error); });
 }
 function rememberUndo() { undoSnapshot = { kind: 'all', data: JSON.parse(JSON.stringify({ settings: state.settings, overrides: state.overrides, notes: state.notes })) }; const button = document.querySelector('#undoButton'); if (button) button.disabled = false; }
@@ -103,6 +107,8 @@ function undoLastChange() {
   else if (!document.querySelector('#dayEditor').classList.contains('is-hidden')) openEditor();
 }
 function applyCloudData(data) {
+  const remoteUpdatedAt = data.syncMeta ? Date.parse(data.syncMeta.updatedAt) : 0;
+  if (remoteUpdatedAt && remoteUpdatedAt < lastLocalUpdateAt) return;
   if (data.settings && typeof data.settings === 'object') state.settings = { ...state.settings, ...data.settings };
   if (data.overrides && typeof data.overrides === 'object') state.overrides = data.overrides;
   if (data.notes && typeof data.notes === 'object') state.notes = data.notes;
@@ -262,7 +268,7 @@ function shiftsFor(date) {
   return { intel: override.intel || intel(date), pfizer: override.pfizer || pfizer(date), creche: override.creche || creche(date) };
 }
 
-function typeLabel(type) { return ({ day: 'DAY', night: 'NIGHT', off: 'OFF', creche: 'ON', hospital: 'HOSPITAL APPOINTMENT' })[type]; }
+function typeLabel(type) { return ({ day: 'DAY', night: 'NIGHT', off: 'OFF', creche: 'ON', hospital: 'HOSPITAL APPOINTMENT', overtime: 'OVERTIME', leave: 'ANNUAL LEAVE' })[type]; }
 function statusDescription(type) { return ({ day: 'Day shift', night: 'Night shift', off: 'Rest day', creche: people().creche })[type]; }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]); }
 
@@ -285,9 +291,10 @@ function renderHero() {
     const monthShifts = shiftsFor(monthDate);
     if (monthShifts.intel !== OFF && monthShifts.pfizer !== OFF) overlapCount += 1;
   }
-  document.querySelector('#nextShift').innerHTML = `<p class="overline">${isToday ? 'TODAY · ' : ''}${format(date, { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase()}</p><div class="shift-main"><div><p class="shift-name">${isToday ? title : 'Pattern for this day'}</p><p class="shift-meta">${active.length ? `${active.length} scheduled` : 'No scheduled shifts'}</p></div><div class="header-summary"><span class="overlap-summary" aria-label="${overlapCount} shift overlap days">${overlapCount} overlap</span></div></div><div class="selected-shifts" aria-label="Calendars">${Object.entries(shifts).map(([name, type]) => `<button class="selected-shift ${type} calendar-toggle ${state.visibility[name] ? 'selected' : ''}" type="button" data-calendar="${name}" aria-pressed="${state.visibility[name]}" aria-label="${escapeHtml(people()[name])} calendar ${state.visibility[name] ? 'visible' : 'hidden'}"><strong>${personInitial(people()[name])} · ${escapeHtml(people()[name])}</strong><span>${typeLabel(type)}</span></button>`).join('')}</div>${note?.text ? `<p class="selected-note"><strong>${note.type === 'note' ? 'NOTE' : typeLabel(note.type) || note.type.toUpperCase()}</strong> ${escapeHtml(note.text)}</p>` : ''}<button id="editDayButton" class="edit-day-button" type="button">Edit selected day</button>`;
+  const noteDetails = note?.title || note?.time || note?.location || note?.text;
+  const noteLabel = note?.title || note?.text;
+  document.querySelector('#nextShift').innerHTML = `<p class="overline">${isToday ? 'TODAY · ' : ''}${format(date, { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase()}</p><div class="shift-main"><div><p class="shift-name">${isToday ? title : 'Pattern for this day'}</p><p class="shift-meta">${active.length ? `${active.length} scheduled` : 'No scheduled shifts'}</p></div><div class="header-summary"><span class="overlap-summary" aria-label="${overlapCount} shift overlap days">${overlapCount} overlap</span></div></div><div class="selected-shifts" aria-label="Calendars">${Object.entries(shifts).map(([name, type]) => `<button class="selected-shift ${type} calendar-toggle ${state.visibility[name] ? 'selected' : ''}" type="button" data-calendar="${name}" aria-pressed="${state.visibility[name]}" aria-label="${escapeHtml(people()[name])} calendar ${state.visibility[name] ? 'visible' : 'hidden'}"><strong>${personInitial(people()[name])} · ${escapeHtml(people()[name])}</strong><span>${typeLabel(type)}</span></button>`).join('')}</div><p class="selected-note">${noteDetails ? `<strong>${note?.title ? escapeHtml(note.title) : (note.type === 'note' ? 'NOTE' : typeLabel(note.type) || note.type.toUpperCase())}</strong>${noteLabel && note?.title && note?.text ? ` ${escapeHtml(note.text)}` : ''}${note?.time ? ` · ${escapeHtml(note.time)}` : ''}${note?.location ? ` · ${escapeHtml(note.location)}` : ''}${!note?.title && note?.text ? ` ${escapeHtml(note.text)}` : ''}` : 'No details'}</p>`;
   document.querySelectorAll('.calendar-toggle').forEach(button => button.addEventListener('click', toggleCalendarVisibility));
-  document.querySelector('#editDayButton').addEventListener('click', openEditor);
 }
 
 // Build the calendar grid, including notes, markers, and overlaps.
@@ -309,7 +316,15 @@ function renderMonth() {
     const overlap = state.visibility.intel && state.visibility.pfizer && shifts.intel !== OFF && shifts.pfizer !== OFF;
     button.className = `calendar-day${inMonth ? '' : ' outside'}${dayKey(date) === dayKey(today) ? ' today' : ''}${dayKey(date) === dayKey(state.selectedDate) ? ' selected' : ''}${overlap ? ' overlap' : ''}`;
     button.innerHTML = `${state.notes[dayKey(date)] ? '<i class="note-indicator" aria-label="Note added"></i>' : ''}<span class="date-number">${date.getUTCDate()}</span><span class="day-dots">${Object.entries(shifts).filter(([name]) => state.visibility[name]).map(([name, type]) => `<i class="dot ${name} ${type}" aria-label="${escapeHtml(names[name])} ${typeLabel(type)}">${personInitial(names[name])}</i>`).join('')}</span>`;
-    button.addEventListener('click', () => selectDay(date));
+    button.addEventListener('click', () => {
+      const key = dayKey(date);
+      const now = Date.now();
+      const sameDateClickedTwice = lastCalendarClick.key === key && now - lastCalendarClick.time < 450;
+      lastCalendarClick = { key, time: now };
+      state.selectedDate = date;
+      if (sameDateClickedTwice) openEditor();
+      else render();
+    });
     grid.appendChild(button);
   }
 }
@@ -353,10 +368,11 @@ function openEditor() {
     return `<div class="sheet-row"><div><strong>${escapeHtml(people()[name])}</strong><span>Pattern: ${statusDescription(type)}</span></div><div class="sheet-toggle">${allowed.map(option => `<button class="type-button ${option === type ? 'selected' : ''}" data-person="${name}" data-type="${option}">${typeLabel(option)}</button>`).join('')}</div></div>`;
   }).join('');
   document.querySelectorAll('.type-button').forEach(button => button.addEventListener('click', saveDayOverride));
-  const note = state.notes[dayKey(date)] || { type: 'note', text: '' };
-  document.querySelector('#noteType').value = note.type;
-  document.querySelector('#noteText').value = note.text;
-  updateNotePlaceholder();
+  const note = state.notes[dayKey(date)] || { type: 'note', text: '', title: '', time: '', location: '' };
+  document.querySelector('#noteDate').value = dayKey(date);
+  document.querySelector('#noteTitle').value = note.title || '';
+  document.querySelector('#noteTime').value = note.time || '';
+  document.querySelector('#noteLocation').value = note.location || '';
   document.querySelector('#sheetScrim').classList.remove('is-hidden'); document.querySelector('#dayEditor').classList.remove('is-hidden');
 }
 function closeEditor() { document.querySelector('#sheetScrim').classList.add('is-hidden'); document.querySelector('#dayEditor').classList.add('is-hidden'); }
@@ -369,15 +385,16 @@ function syncAutomaticNote(key, date) {
   const isAutomatic = note?.automatic || new RegExp(`^(${[names.intel, names.pfizer].map(escapeRegExp).join('|')}) (Leave|OT)(, (${[names.intel, names.pfizer].map(escapeRegExp).join('|')}) (Leave|OT))*$`).test(note?.text || '');
   if (toggledPeople.length) {
     const allOff = toggledPeople.every(person => override[person] === OFF);
-    state.notes[key] = { type: allOff ? 'leave' : 'overtime', text: toggledPeople.map(person => `${people()[person]} ${override[person] === OFF ? 'Leave' : 'OT'}`).join(', '), automatic: true };
+    const noteType = allOff ? 'leave' : 'overtime';
+    const title = toggledPeople.map(person => `${people()[person]} ${override[person] === OFF ? 'Annual Leave' : 'Overtime'}`).join(', ');
+    state.notes[key] = { type: noteType, title, text: toggledPeople.map(person => `${people()[person]} ${override[person] === OFF ? 'Leave' : 'OT'}`).join(', '), automatic: true };
   } else if (isAutomatic) delete state.notes[key];
 }
 function escapeRegExp(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 // Save a shift toggle, or remove it when the original pattern is selected.
 function saveDayOverride(event) { const { person, type } = event.currentTarget.dataset; const key = dayKey(state.selectedDate); rememberDayUndo(key); const originalType = ({ intel, pfizer, creche })[person](state.selectedDate); if (type === originalType) { if (state.overrides[key]) { delete state.overrides[key][person]; if (!Object.keys(state.overrides[key]).length) delete state.overrides[key]; } } else { state.overrides[key] = { ...(state.overrides[key] || {}), [person]: type }; } syncAutomaticNote(key, state.selectedDate); localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); openEditor(); render(); }
 function resetSelectedDay() { const key = dayKey(state.selectedDate); rememberDayUndo(key); delete state.overrides[key]; delete state.notes[key]; localStorage.setItem('shiftly-overrides', JSON.stringify(state.overrides)); localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); closeEditor(); render(); }
-function saveNote() { const key = dayKey(state.selectedDate); rememberDayUndo(key); const type = document.querySelector('#noteType').value; const text = document.querySelector('#noteText').value.trim(); state.notes[key] = { type, text }; localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); closeEditor(); render(); }
-function updateNotePlaceholder() { document.querySelector('#noteText').placeholder = document.querySelector('#noteType').value === 'hospital' ? 'Time & Location' : 'Optional details'; }
+function saveNote() { const key = dayKey(state.selectedDate); rememberDayUndo(key); const title = document.querySelector('#noteTitle').value.trim(); const time = document.querySelector('#noteTime').value; const location = document.querySelector('#noteLocation').value.trim(); state.notes[key] = { type: 'hospital', text: '', title, time, location }; localStorage.setItem('shiftly-notes', JSON.stringify(state.notes)); saveCloudState(); closeEditor(); render(); }
 function parsePattern(value) { const pattern = value.split(',').map(item => Number(item.trim())); if (!pattern.length || pattern.some(item => !Number.isInteger(item) || item === 0)) throw new Error('Use comma-separated non-zero whole numbers.'); return pattern; }
 function parseCrecheDays(value) { const parts = value.split(',').map(item => item.trim()); if (!parts.length || parts.some(part => part === '')) throw new Error('Use unique comma-separated weekday numbers from 0 to 6.'); const days = parts.map(Number); if (days.some(day => !Number.isInteger(day) || day < 0 || day > 6) || new Set(days).size !== days.length) throw new Error('Use unique comma-separated weekday numbers from 0 to 6.'); return days; }
 function dateFromInput(value) { const [year, month, day] = value.split('-').map(Number); return utcDate(year, month, day); }
@@ -436,10 +453,9 @@ function unescapeIcs(value) { return value.replace(/\\n/g, '\n').replace(/\\,/g,
 function exportIcs() {
   const events = Object.entries(state.notes).filter(([, note]) => note.type === 'hospital').map(([dateKey, note], index) => {
     const date = dateKey.replace(/-/g, '');
-    const time = String(note.text || '').match(/\b([01]\d|2[0-3]):([0-5]\d)\b/);
-    const location = String(note.text || '').match(/(?:^|[;|\n])\s*location:\s*([^;|\n]+)/i);
+    const time = String(note.time || String(note.text || '').match(/\b([01]\d|2[0-3]):([0-5]\d)\b/)?.[0] || '').match(/^([01]\d|2[0-3]):([0-5]\d)$/);
     const start = time ? `DTSTART:${date}T${time[1]}${time[2]}00` : `DTSTART;VALUE=DATE:${date}`;
-    return ['BEGIN:VEVENT', `UID:shiftly-${dateKey}-${index}@shiftly`, `DTSTAMP:${date}T000000Z`, start, 'SUMMARY:Hospital appointment', location ? `LOCATION:${escapeIcs(location[1].trim())}` : '', `DESCRIPTION:${escapeIcs(note.text)}`, 'END:VEVENT'].filter(Boolean).join('\r\n');
+    return ['BEGIN:VEVENT', `UID:shiftly-${dateKey}-${index}@shiftly`, `DTSTAMP:${date}T000000Z`, start, `SUMMARY:${escapeIcs(note.title || 'Hospital appointment')}`, note.location ? `LOCATION:${escapeIcs(note.location)}` : '', `DESCRIPTION:${escapeIcs(note.text || '')}`, 'END:VEVENT'].filter(Boolean).join('\r\n');
   });
   const calendar = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Shiftly//Hospital appointments//EN', ...events, 'END:VCALENDAR'].join('\r\n');
   downloadBlob(new Blob([calendar], { type: 'text/calendar;charset=utf-8' }), 'shiftly-hospital-appointments.ics');
@@ -479,6 +495,7 @@ setTheme(state.theme);
 document.querySelector('#previousMonth').addEventListener('click', () => changeMonth(-1));
 document.querySelector('#nextMonth').addEventListener('click', () => changeMonth(1));
 let swipeStartX = null;
+document.querySelector('#addDayButton').addEventListener('click', openEditor);
 document.querySelector('#calendarGrid').addEventListener('touchstart', event => { if (event.touches.length === 1) swipeStartX = event.touches[0].clientX; }, { passive: true });
 document.querySelector('#calendarGrid').addEventListener('touchend', event => { if (swipeStartX === null) return; const distance = event.changedTouches[0].clientX - swipeStartX; swipeStartX = null; if (Math.abs(distance) < 55) return; changeMonth(distance < 0 ? 1 : -1); }, { passive: true });
 document.querySelector('#todayButton').addEventListener('click', goToday);
@@ -492,7 +509,6 @@ document.querySelector('#settingsForm').addEventListener('submit', saveSettings)
 document.querySelector('#closeEditor').addEventListener('click', closeEditor);
 document.querySelector('#resetDay').addEventListener('click', resetSelectedDay);
 document.querySelector('#saveNote').addEventListener('click', saveNote);
-document.querySelector('#noteType').addEventListener('change', updateNotePlaceholder);
 document.querySelector('#exportImage').addEventListener('click', exportImage);
 document.querySelector('#exportPdf').addEventListener('click', exportPdf);
 document.querySelector('#resetAllChanges').addEventListener('click', resetAllChanges);
