@@ -54,7 +54,7 @@ h2 { margin-bottom: 0; font-size: 19px; letter-spacing: -.04em; }
 .edit-day-button { width: 100%; margin-top: 11px; padding: 9px; border: 1px solid var(--line); border-radius: 11px; background: linear-gradient(135deg, rgba(255,255,255,.76), rgba(255,255,255,.42)); color: var(--ink); font-size: 12px; font-weight: 800; }
 
 /* Calendar grid, shift markers, and overlap highlighting. */
-.month-panel { padding: 17px 13px 14px; border: 1px solid var(--line); border-radius: 25px; background: linear-gradient(135deg, #fffdf9 0%, #edf6f6 58%, #dceff0 100%); box-shadow: var(--shadow); touch-action: pan-y; }
+.month-panel { position: relative; padding: 17px 13px 14px; border: 1px solid var(--line); border-radius: 25px; background: linear-gradient(135deg, #fffdf9 0%, #edf6f6 58%, #dceff0 100%); box-shadow: var(--shadow); touch-action: pan-y; }
 .month-navigation { padding: 0 3px 14px; }
 .month-heading { border: 0; background: none; font-size: 18px; font-weight: 800; letter-spacing: -.035em; color: var(--ink); }
 .nav-button, .close-button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 13px; background: white; color: var(--ink); font-size: 18px; }
@@ -67,7 +67,10 @@ h2 { margin-bottom: 0; font-size: 19px; letter-spacing: -.04em; }
 .calendar-day.today { background: #8fbabd; color: #173b41; }
 .calendar-day.selected { box-shadow: inset 0 0 0 2px var(--lime); background: #e6f1f3; color: #1e5964; }
 .calendar-day.today.selected { box-shadow: inset 0 0 0 3px var(--lime); background: #8fbabd; color: #173b41; }
-.calendar-day.overlap:not(.selected) { box-shadow: inset 0 0 0 2px var(--lime); }
+.calendar-day.overlap:not(.selected) { background: transparent; }
+.calendar-day.overlap:not(.selected)::after { position: absolute; right: 0; bottom: 0; left: 0; height: 10%; border: 2px solid var(--lime); border-top: 0; border-radius: 0 0 12px 12px; content: ''; pointer-events: none; }
+.add-day-button { position: absolute; right: 14px; bottom: -12px; z-index: 2; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--ink); border-radius: 50%; background: transparent; color: var(--ink); font-size: 19px; font-weight: 500; line-height: 1; cursor: pointer; }
+.add-day-button:hover, .add-day-button:focus-visible { background: var(--off); outline: 3px solid var(--lime); outline-offset: 2px; }
 .date-number { display: block; text-align: center; font-size: 12px; font-weight: 760; }
 .day-dots { display: flex; justify-content: center; gap: 3px; margin-top: 7px; min-height: 7px; }
 .dot { width: 11px; height: 11px; display: grid; place-items: center; border-radius: 50%; color: white; font-size: 6px; font-style: normal; font-weight: 900; line-height: 1; }
@@ -109,7 +112,8 @@ h2 { margin-bottom: 0; font-size: 19px; letter-spacing: -.04em; }
 :root[data-theme="dark"] .day-sheet,
 :root[data-theme="dark"] .settings-form input,
 :root[data-theme="dark"] .note-fields select,
-:root[data-theme="dark"] .note-fields input { background:var(--card); color:var(--ink); }
+:root[data-theme="dark"] .note-fields input,
+:root[data-theme="dark"] .appointment-fields input { background:var(--card); color:var(--ink); }
 :root[data-theme="dark"] .sheet-row,
 :root[data-theme="dark"] .note-editor,
 :root[data-theme="dark"] .export-settings { background:#161d29; }
@@ -167,7 +171,7 @@ h2 { margin-bottom: 0; font-size: 19px; letter-spacing: -.04em; }
 }
 
 /* Notes, settings fields, exports, and responsive presentation. */
-.note-editor { display:grid; gap:8px; margin-top:17px; padding:13px; border:1px solid var(--line); border-radius:17px; background:#f8f8f6; }.note-editor label,.export-title { font-size:12px; font-weight:800; }.note-fields { display:grid; grid-template-columns:116px 1fr; gap:7px; }.note-fields select,.note-fields input { min-width:0; min-height:38px; padding:8px; border:1px solid var(--line); border-radius:10px; background:white; color:var(--ink); font:inherit; font-size:12px; }.note-save-button { min-height:37px; border:0; border-radius:10px; background:var(--purple); color:white; font-size:12px; font-weight:800; }.note-indicator { position:absolute; right:5px; top:5px; width:6px; height:6px; border-radius:50%; background:var(--rose); }.theme-setting { display:flex !important; flex-flow:row !important; align-items:center; justify-content:space-between; padding:3px 0; }.theme-setting small { display:block; margin-top:3px; color:var(--muted); font-weight:500; }.theme-setting input { width:22px !important; min-height:22px !important; accent-color:var(--purple); }.export-settings { padding:14px; border:1px solid var(--line); border-radius:14px; background:#f8f8f6; }.export-settings p { margin:0; color:var(--muted); font-size:12px; line-height:1.4; }.export-settings .export-title { margin-bottom:3px; color:var(--ink); }.export-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:11px; }.export-actions button { min-height:39px; border:1px solid var(--line); border-radius:10px; background:white; color:var(--ink); font-size:11px; font-weight:800; }
+.note-editor { display:grid; gap:8px; margin-top:17px; padding:13px; border:1px solid var(--line); border-radius:17px; background:#f8f8f6; }.note-editor label,.export-title { font-size:12px; font-weight:800; }.note-fields { display:grid; grid-template-columns:116px 1fr; gap:7px; }.note-fields select,.note-fields input,.appointment-fields input { min-width:0; min-height:38px; padding:8px; border:1px solid var(--line); border-radius:10px; background:white; color:var(--ink); font:inherit; font-size:12px; }.appointment-fields { display:grid; gap:8px; margin:2px 0 0; padding:10px; border:1px solid var(--line); border-radius:12px; }.appointment-fields legend { padding:0 4px; font-size:11px; font-weight:800; }.appointment-fields label { display:grid; gap:5px; }.note-save-button { min-height:37px; border:0; border-radius:10px; background:var(--purple); color:white; font-size:12px; font-weight:800; }.note-indicator { position:absolute; right:5px; top:5px; width:6px; height:6px; border-radius:50%; background:var(--rose); }.theme-setting { display:flex !important; flex-flow:row !important; align-items:center; justify-content:space-between; padding:3px 0; }.theme-setting small { display:block; margin-top:3px; color:var(--muted); font-weight:500; }.theme-setting input { width:22px !important; min-height:22px !important; accent-color:var(--purple); }.export-settings { padding:14px; border:1px solid var(--line); border-radius:14px; background:#f8f8f6; }.export-settings p { margin:0; color:var(--muted); font-size:12px; line-height:1.4; }.export-settings .export-title { margin-bottom:3px; color:var(--ink); }.export-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:11px; }.export-actions button { min-height:39px; border:1px solid var(--line); border-radius:10px; background:white; color:var(--ink); font-size:11px; font-weight:800; }
 
 :root[data-theme="dark"] { --ink:#f4f5f1; --muted:#a9b1bd; --paper:#121722; --card:#1b2230; --line:#303a4b; --off:#313b48; --purple-pale:#292448; --orange-pale:#3d2e20; --rose-pale:#3e2430; --shadow:0 12px 28px rgba(0,0,0,.28); color-scheme:dark; }:root[data-theme="dark"] .today-button,:root[data-theme="dark"] .calendar-day.today,:root[data-theme="dark"] .save-button { background:#f4f5f1; color:#18202b; }:root[data-theme="dark"] .nav-button,:root[data-theme="dark"] .settings-button,:root[data-theme="dark"] .day-sheet,:root[data-theme="dark"] .note-fields select,:root[data-theme="dark"] .note-fields input,:root[data-theme="dark"] .export-actions button { background:#1b2230; color:var(--ink); }:root[data-theme="dark"] .note-editor,:root[data-theme="dark"] .export-settings { background:#161d29; }:root[data-theme="dark"] .calendar-day.selected { color:#dfdbff; }
 :root[data-theme="dark"] .next-shift { background: linear-gradient(135deg, #20293a 0%, #302b58 100%); }
